@@ -1,0 +1,361 @@
+/*
+ * youtube-focus.css
+ * Safari user stylesheet — blocks YouTube distractions
+ * Part of the IntelligentBlockYT / YouTube Focus Watchdog project
+ *
+ * Sections:
+ *   1. Homepage recommendation grid
+ *   2. Recommended video titles
+ *   3. Thumbnails (replaced with grey boxes)
+ *   4. Shorts (shelf, navigation entry, standalone page)
+ *   5. Up Next sidebar on video pages
+ *   6. End screens (end-of-video overlay suggestions)
+ *   7. Topic / category filter bar
+ *   8. Channel avatars in recommendations
+ *
+ * Intentionally preserved:
+ *   - Search bar (#search, ytd-searchbox)
+ *   - Video player (#movie_player, .html5-video-player)
+ *   - Subscriptions feed (/feed/subscriptions) — rules are scoped
+ *     so that the subscriptions page is not targeted
+ *
+ * All rules use !important because Safari injects this as a
+ * low-priority user stylesheet and YouTube's inline / scoped
+ * styles would otherwise win.
+ *
+ * Selector coverage: both the "classic" Polymer (ytd-*) layout
+ * and the newer inner-tube / masthead variants used from 2023 onward.
+ * Tested against the YouTube DOM as of early 2026.
+ */
+
+
+/* ============================================================
+   1. HOMEPAGE RECOMMENDATION GRID
+   Hides the rich-grid feed rendered on youtube.com/
+   Scoped away from /feed/subscriptions so the subscriptions
+   page continues to work normally.
+   ============================================================ */
+
+/* Primary rich-grid container (homepage + explore) */
+ytd-browse[page-subtype="home"] ytd-rich-grid-renderer,
+ytd-browse[page-subtype="home"] ytd-rich-grid-row,
+ytd-browse[page-subtype="home"] ytd-rich-item-renderer,
+ytd-browse[page-subtype="home"] #primary > ytd-rich-grid-renderer {
+    display: none !important;
+}
+
+/* "Recommended for you" section shelves on the homepage */
+ytd-browse[page-subtype="home"] ytd-rich-section-renderer,
+ytd-browse[page-subtype="home"] ytd-rich-shelf-renderer {
+    display: none !important;
+}
+
+/* Fallback: hide the entire primary content column on the homepage
+   if the above selectors miss a structural change */
+ytd-browse[page-subtype="home"] #primary {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* Keep the masthead / header visible on all pages */
+ytd-browse[page-subtype="home"] #masthead-container {
+    visibility: visible !important;
+    pointer-events: auto !important;
+}
+
+
+/* ============================================================
+   2. RECOMMENDED VIDEO TITLES
+   Hides video title text in recommendation surfaces:
+   homepage grid, watch-page sidebar, and search results.
+   The video player title overlay is preserved.
+   ============================================================ */
+
+/* Titles inside rich-grid items (homepage) */
+ytd-rich-item-renderer #video-title,
+ytd-rich-item-renderer h3,
+ytd-rich-item-renderer yt-formatted-string#video-title {
+    visibility: hidden !important;
+}
+
+/* Titles inside compact video items (sidebar / Up Next) */
+ytd-compact-video-renderer #video-title,
+ytd-compact-video-renderer h3,
+ytd-compact-video-renderer span#video-title {
+    visibility: hidden !important;
+}
+
+/* Titles in playlist compact renderers */
+ytd-compact-playlist-renderer #video-title,
+ytd-compact-radio-renderer  #video-title {
+    visibility: hidden !important;
+}
+
+/* Titles in the search results list */
+ytd-video-renderer #video-title,
+ytd-video-renderer h3.ytd-video-renderer {
+    visibility: hidden !important;
+}
+
+/* Metadata lines (channel name, view count) in recommendation cards */
+ytd-rich-item-renderer #metadata,
+ytd-rich-item-renderer ytd-video-meta-block,
+ytd-compact-video-renderer #metadata,
+ytd-compact-video-renderer ytd-video-meta-block {
+    visibility: hidden !important;
+}
+
+
+/* ============================================================
+   3. THUMBNAILS — CSS FALLBACK (grey placeholder boxes)
+   DNS blocking (i.ytimg.com) handles the network level.
+   These rules replace any thumbnail that does load with a
+   neutral grey rectangle, preventing visual temptation.
+   ============================================================ */
+
+/* Thumbnail containers in the rich-grid and compact renderers */
+ytd-rich-item-renderer ytd-thumbnail,
+ytd-compact-video-renderer ytd-thumbnail,
+ytd-video-renderer ytd-thumbnail,
+ytd-grid-video-renderer ytd-thumbnail,
+ytd-compact-playlist-renderer ytd-thumbnail,
+ytd-compact-radio-renderer ytd-thumbnail,
+ytd-playlist-video-renderer ytd-thumbnail {
+    background-color: #b0b0b0 !important;
+}
+
+/* Hide the actual <img> inside every recommendation thumbnail */
+ytd-rich-item-renderer ytd-thumbnail img,
+ytd-compact-video-renderer ytd-thumbnail img,
+ytd-video-renderer ytd-thumbnail img,
+ytd-grid-video-renderer ytd-thumbnail img,
+ytd-compact-playlist-renderer ytd-thumbnail img,
+ytd-compact-radio-renderer ytd-thumbnail img,
+ytd-playlist-video-renderer ytd-thumbnail img {
+    opacity: 0 !important;
+}
+
+/* Animated hover previews (mouseover video previews) */
+ytd-rich-item-renderer ytd-thumbnail ytd-thumbnail-overlay-toggle-button-renderer,
+ytd-rich-item-renderer ytd-thumbnail .ytd-thumbnail-overlay-time-status-renderer,
+ytd-rich-item-renderer yt-image,
+ytd-compact-video-renderer yt-image {
+    display: none !important;
+}
+
+/* Duration badge overlaid on thumbnails */
+ytd-rich-item-renderer ytd-thumbnail-overlay-time-status-renderer,
+ytd-compact-video-renderer ytd-thumbnail-overlay-time-status-renderer,
+ytd-video-renderer ytd-thumbnail-overlay-time-status-renderer {
+    display: none !important;
+}
+
+/* Newer yt-image web component used in the 2024+ layout */
+ytd-rich-item-renderer yt-image img,
+ytd-compact-video-renderer yt-image img,
+ytd-video-renderer yt-image img {
+    opacity: 0 !important;
+}
+
+
+/* ============================================================
+   4. SHORTS — shelf, navigation entry, standalone page
+   Covers: homepage shelf, sidebar entry, search shelf,
+   subscriptions feed injection, and the /shorts/* URL.
+   ============================================================ */
+
+/* Shorts shelf on the homepage and search results */
+ytd-reel-shelf-renderer,
+ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
+ytd-rich-shelf-renderer[is-shorts] {
+    display: none !important;
+}
+
+/* Shorts items injected into the rich-grid (individual cards) */
+ytd-rich-item-renderer:has([overlay-style="SHORTS"]),
+ytd-grid-video-renderer:has([overlay-style="SHORTS"]),
+ytd-video-renderer:has([overlay-style="SHORTS"]) {
+    display: none !important;
+}
+
+/* Shorts items in the compact sidebar renderer */
+ytd-compact-video-renderer:has([overlay-style="SHORTS"]) {
+    display: none !important;
+}
+
+/* Left-rail navigation entry — "Shorts" with the icon */
+ytd-guide-entry-renderer:has(a[title="Shorts"]),
+ytd-guide-entry-renderer:has([title="Shorts"]),
+ytd-mini-guide-entry-renderer:has(a[title="Shorts"]),
+ytd-mini-guide-entry-renderer:has([title="Shorts"]) {
+    display: none !important;
+}
+
+/* Shorts section on a channel's page */
+ytd-browse ytd-reel-shelf-renderer,
+ytd-browse ytd-rich-section-renderer ytd-reel-shelf-renderer {
+    display: none !important;
+}
+
+/* Standalone /shorts/* page — hide the player chrome that
+   auto-advances to the next Short */
+ytd-shorts,
+ytd-shorts #shorts-container {
+    display: none !important;
+}
+
+/* Reel items and their container */
+ytd-reel-item-renderer,
+ytd-reel-video-renderer {
+    display: none !important;
+}
+
+/* Shorts chip in the search filter bar */
+yt-chip-cloud-chip-renderer:has(a[href*="sp=EgIQAQ"]) {
+    display: none !important;
+}
+
+
+/* ============================================================
+   5. UP NEXT SIDEBAR (watch page)
+   Hides the secondary column containing "Up Next" and the
+   autoplay queue while leaving the player column intact.
+   ============================================================ */
+
+/* Entire secondary column on the watch page */
+ytd-watch-flexy #secondary,
+ytd-watch-flexy #secondary-inner,
+ytd-watch-next-secondary-results-renderer {
+    display: none !important;
+}
+
+/* Autoplay toggle and the "Up next" label */
+ytd-compact-autoplay-renderer,
+#autoplay-checkbox,
+.ytd-watch-next-secondary-results-renderer {
+    display: none !important;
+}
+
+
+/* ============================================================
+   6. END SCREENS (end-of-video overlay suggestions)
+   Hides the clickable suggestion tiles that appear over the
+   last 20 seconds of a video.
+   ============================================================ */
+
+/* End-screen element tiles (video + playlist suggestions) */
+.ytp-ce-element,
+.ytp-ce-covering-overlay,
+.ytp-ce-element-shadow,
+.ytp-ce-covering-image,
+.ytp-ce-expanding-image,
+.ytp-ce-video,
+.ytp-ce-playlist,
+.ytp-ce-channel {
+    display: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+}
+
+/* End-screen grid container */
+.ytp-endscreen-content,
+.html5-endscreen {
+    display: none !important;
+}
+
+/* End-screen panels in the newer 2024+ player */
+.ytp-player-content .videowall-endscreen,
+.videowall-endscreen {
+    display: none !important;
+}
+
+
+/* ============================================================
+   7. TOPIC / CATEGORY FILTER BAR
+   Hides the horizontal chip row (Gaming, Music, News, etc.)
+   shown below the masthead on the homepage and search pages.
+   ============================================================ */
+
+/* Primary filter chip bar component */
+ytd-feed-filter-chip-bar-renderer,
+#chip-bar,
+yt-chip-cloud-renderer {
+    display: none !important;
+}
+
+/* Inner chip row and its gradient fade overlays */
+yt-chip-cloud-chip-renderer,
+ytd-feed-filter-chip-bar-renderer #left-arrow,
+ytd-feed-filter-chip-bar-renderer #right-arrow {
+    display: none !important;
+}
+
+/* Older layout: the filter-bar container inside the page header */
+ytd-section-list-renderer > #filter-bar-container,
+ytd-browse #filter-bar-container {
+    display: none !important;
+}
+
+
+/* ============================================================
+   8. CHANNEL AVATARS IN RECOMMENDATIONS
+   Replaces channel photo circles with a neutral grey disc so
+   that familiar faces don't trigger click impulses.
+   ============================================================ */
+
+/* Avatar images inside rich-grid recommendation cards */
+ytd-rich-item-renderer yt-avatar-shape img,
+ytd-rich-item-renderer ytd-avatar-shape img,
+ytd-rich-item-renderer #avatar img,
+ytd-rich-item-renderer #channel-thumbnail img,
+ytd-rich-item-renderer yt-img-shadow img {
+    opacity: 0 !important;
+}
+
+ytd-rich-item-renderer yt-avatar-shape,
+ytd-rich-item-renderer ytd-avatar-shape,
+ytd-rich-item-renderer #avatar,
+ytd-rich-item-renderer #channel-thumbnail {
+    background-color: #b0b0b0 !important;
+    border-radius: 50% !important;
+}
+
+/* Avatar images in compact sidebar renderers */
+ytd-compact-video-renderer yt-avatar-shape img,
+ytd-compact-video-renderer ytd-avatar-shape img,
+ytd-compact-video-renderer #channel-thumbnail img {
+    opacity: 0 !important;
+}
+
+ytd-compact-video-renderer yt-avatar-shape,
+ytd-compact-video-renderer ytd-avatar-shape,
+ytd-compact-video-renderer #channel-thumbnail {
+    background-color: #b0b0b0 !important;
+    border-radius: 50% !important;
+}
+
+/* Avatar images in search result renderers */
+ytd-video-renderer yt-avatar-shape img,
+ytd-video-renderer ytd-avatar-shape img,
+ytd-video-renderer #channel-thumbnail img {
+    opacity: 0 !important;
+}
+
+ytd-video-renderer yt-avatar-shape,
+ytd-video-renderer ytd-avatar-shape {
+    background-color: #b0b0b0 !important;
+    border-radius: 50% !important;
+}
+
+
+/* ============================================================
+   PRESERVED ELEMENTS (documentation — no rules needed)
+   The following are intentionally left untouched:
+     - #masthead-container     → top bar with search field
+     - ytd-searchbox           → search input
+     - #search-form            → search form
+     - #movie_player           → HTML5 video player
+     - .html5-video-player     → player container
+     - ytd-browse[page-subtype="subscriptions"]
+                               → subscriptions feed (/feed/subscriptions)
+   ============================================================ */

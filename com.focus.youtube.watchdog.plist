@@ -1,0 +1,37 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- Unique identifier for the daemon -->
+    <key>Label</key>
+    <string>com.focus.youtube.watchdog</string>
+
+    <!-- Command to execute: /bin/bash + path to watchdog.sh -->
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/usr/local/bin/watchdog.sh</string>
+    </array>
+
+    <!-- Run immediately when the daemon is loaded (at boot) -->
+    <key>RunAtLoad</key>
+    <true/>
+
+    <!-- Re-run every 120 seconds (2 minutes) -->
+    <key>StartInterval</key>
+    <integer>120</integer>
+
+    <!-- Stdout log file -->
+    <key>StandardOutPath</key>
+    <string>/var/log/youtube-focus.log</string>
+
+    <!-- Stderr log file -->
+    <key>StandardErrorPath</key>
+    <string>/var/log/youtube-focus-error.log</string>
+
+    <!-- Run as root (required to write to /etc/hosts) -->
+    <key>UserName</key>
+    <string>root</string>
+</dict>
+</plist>
+

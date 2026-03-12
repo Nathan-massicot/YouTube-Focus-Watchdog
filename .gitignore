@@ -1,0 +1,18 @@
+# YouTube Focus Watchdog — .gitignore
+
+# Project files not meant for public distribution
+youtube-focus-spec.md
+test-loop.sh
+cleanup.sh
+CLAUDE.md
+Claude.md
+.claude
+
+# macOS metadata
+.DS_Store
+
+# Log files generated at runtime
+*.log
+
+# Temporary files created during install
+/tmp/
