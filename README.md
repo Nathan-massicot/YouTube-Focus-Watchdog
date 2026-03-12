@@ -59,8 +59,8 @@ subscriptions. Enforcement is automatic, persistent, and time-limited.
 ## Installation
 
 ```bash
-git clone https://github.com/your-username/youtube-focus-watchdog.git
-cd youtube-focus-watchdog
+git clone https://github.com/Nathan-massicot/YouTube-Focus-Watchdog.git
+cd YouTube-Focus-Watchdog
 sudo bash install.sh
 ```
 
