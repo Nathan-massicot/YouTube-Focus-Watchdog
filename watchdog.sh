@@ -1,244 +1,117 @@
 #!/bin/bash
-# YouTube Focus Watchdog — Self-healing monitoring script
-# Runs every 5 minutes as root via a macOS LaunchDaemon.
-# Ensures the CSS stylesheet, Safari preferences, and /etc/hosts entries
-# remain intact for the duration of the blocking period.
+# YouTube Focus Watchdog — self-healing enforcement script.
+# Launched by launchd ONLY when a watched file changes (WatchPaths), plus one
+# safety-net pass every 5 minutes — never on a tight polling loop, so it adds
+# zero load while videos play. Each check repairs only when drift is found.
 
 # ---------------------------------------------------------------------------
-# CSS base64 payload — REPLACED BY INSTALL.SH
-# install.sh will inject the real base64-encoded content of youtube-focus.css
-# into this variable before deploying the script.
-# ---------------------------------------------------------------------------
-CSS_BASE64=""
-
-# ---------------------------------------------------------------------------
-# Config loading
-# Look for config.env next to this script first, then at the system-wide path.
+# Config loading — next to this script first, then the system-wide path
 # ---------------------------------------------------------------------------
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_LOCAL="${SCRIPT_DIR}/config.env"
-CONFIG_SYSTEM="/usr/local/etc/youtube-focus/config.env"
-
-if [[ -f "$CONFIG_LOCAL" ]]; then
+if [[ -f "${SCRIPT_DIR}/config.env" ]]; then
     # shellcheck source=/dev/null
-    source "$CONFIG_LOCAL"
-elif [[ -f "$CONFIG_SYSTEM" ]]; then
+    source "${SCRIPT_DIR}/config.env"
+elif [[ -f /usr/local/etc/youtube-focus/config.env ]]; then
     # shellcheck source=/dev/null
-    source "$CONFIG_SYSTEM"
+    source /usr/local/etc/youtube-focus/config.env
 else
-    echo "[$(date '+%Y-%m-%d %H:%M:%S')] ERROR: config.env not found (checked $CONFIG_LOCAL and $CONFIG_SYSTEM)" >&2
     exit 1
 fi
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-# log MESSAGE — write a timestamped line to $LOG_PATH and to stderr
-log() {
-    local message="$1"
-    local timestamp
-    timestamp="$(date '+%Y-%m-%d %H:%M:%S')"
-    echo "[${timestamp}] ${message}" | tee -a "$LOG_PATH" >&2
-}
+# Immutable backup of the stylesheet, deployed beside the live file by
+# install.sh. It is the restore source: comparing against it replaces the old
+# MD5 hash, so there is no hash to keep in sync. Never watched, never written
+# at runtime — only read.
+CSS_BACKUP="$(dirname "$CSS_PATH")/.youtube-focus.css.bak"
 
 # ---------------------------------------------------------------------------
-# check_expiry — compare today's date with EXPIRY_DATE
-# Returns 0 if the block is still active, exits 0 if it has expired.
+# check_expiry — exit silently once EXPIRY_DATE (the temporal variable) passed
 # ---------------------------------------------------------------------------
 check_expiry() {
-    local today
-    today="$(date '+%Y-%m-%d')"
-
-    # Convert dates to comparable integers by stripping dashes (YYYYMMDD)
-    local today_int expiry_int
-    today_int="${today//-/}"
-    expiry_int="${EXPIRY_DATE//-/}"
-
-    if [[ "$today_int" -gt "$expiry_int" ]]; then
-        log "Block expired (expiry was $EXPIRY_DATE), skipping enforcement"
+    # Fail closed: a missing or malformed EXPIRY_DATE keeps enforcement active
+    [[ "${EXPIRY_DATE:-}" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || return 0
+    if [[ "$(date '+%Y%m%d')" -gt "${EXPIRY_DATE//-/}" ]]; then
         exit 0
     fi
-
-    # Calculate remaining days using macOS date arithmetic
-    local today_epoch expiry_epoch days_remaining
-    today_epoch="$(date -j -f '%Y-%m-%d' "$today" '+%s' 2>/dev/null)"
-    expiry_epoch="$(date -j -f '%Y-%m-%d' "$EXPIRY_DATE" '+%s' 2>/dev/null)"
-    days_remaining=$(( (expiry_epoch - today_epoch) / 86400 ))
-
-    log "Expiry check: $EXPIRY_DATE, OK (${days_remaining} days remaining)"
 }
 
 # ---------------------------------------------------------------------------
-# check_css — ensure the CSS file exists and has not been tampered with
+# check_css — restore the live CSS from the immutable backup when it is missing
+# or differs (tampered). cmp against the backup is the integrity check.
 # ---------------------------------------------------------------------------
 check_css() {
-    local css_dir
-    css_dir="$(dirname "$CSS_PATH")"
+    [[ -f "$CSS_BACKUP" ]] || return 1            # nothing to restore from
+    [[ -d "$(dirname "$CSS_PATH")" ]] || mkdir -p "$(dirname "$CSS_PATH")"
 
-    # Ensure the parent directory exists
-    if [[ ! -d "$css_dir" ]]; then
-        mkdir -p "$css_dir"
-        log "CSS check: created missing directory $css_dir"
-    fi
-
-    # Restore from embedded base64 if the file is missing
-    if [[ ! -f "$CSS_PATH" ]]; then
-        if [[ -z "$CSS_BASE64" ]]; then
-            log "CSS check: ERROR — file missing and CSS_BASE64 is empty, cannot restore"
-            return 1
-        fi
-        echo "$CSS_BASE64" | base64 --decode > "$CSS_PATH"
-        log "CSS check: RESTORED (file was missing)"
-        return 0
-    fi
-
-    # File exists — verify its integrity against the reference MD5 hash.
-    # If CSS_HASH is empty (install.sh has not set it yet), skip integrity check.
-    if [[ -z "$CSS_HASH" ]]; then
-        log "CSS check: OK (no reference hash configured, skipping integrity check)"
-        return 0
-    fi
-
-    local current_hash
-    current_hash="$(md5 -q "$CSS_PATH" 2>/dev/null)"
-
-    if [[ "$current_hash" != "$CSS_HASH" ]]; then
-        if [[ -z "$CSS_BASE64" ]]; then
-            log "CSS check: ERROR — hash mismatch but CSS_BASE64 is empty, cannot restore"
-            return 1
-        fi
-        # Remove the immutable flag temporarily so we can overwrite the file
+    if [[ ! -f "$CSS_PATH" ]] || ! cmp -s "$CSS_PATH" "$CSS_BACKUP"; then
         chflags nouchg "$CSS_PATH" 2>/dev/null
-        echo "$CSS_BASE64" | base64 --decode > "$CSS_PATH"
-        log "CSS check: RESTORED (hash mismatch — expected $CSS_HASH, got $current_hash)"
-    else
-        log "CSS check: OK"
+        cp "$CSS_BACKUP" "$CSS_PATH"
     fi
 }
 
 # ---------------------------------------------------------------------------
-# check_immutability — ensure the CSS file carries the uchg (user immutable) flag
+# check_immutability — keep the uchg (user immutable) flag on the live CSS
 # ---------------------------------------------------------------------------
 check_immutability() {
-    if [[ ! -f "$CSS_PATH" ]]; then
-        log "Immutability check: SKIPPED (CSS file does not exist)"
-        return 1
-    fi
-
-    # ls -lO on macOS prints file flags in the permissions column area.
-    # We look for the literal string "uchg" in that output.
-    local ls_output
-    ls_output="$(ls -lO "$CSS_PATH" 2>/dev/null)"
-
-    if echo "$ls_output" | grep -q "uchg"; then
-        log "Immutability check: OK"
-    else
-        chflags uchg "$CSS_PATH"
-        log "Immutability check: RESTORED (uchg flag was missing, reapplied)"
-    fi
+    [[ -f "$CSS_PATH" ]] || return 0
+    [[ "$(stat -f '%Sf' "$CSS_PATH" 2>/dev/null)" == *uchg* ]] || chflags uchg "$CSS_PATH"
 }
 
 # ---------------------------------------------------------------------------
-# check_safari_prefs — ensure Safari is configured to use our stylesheet
+# check_safari_prefs — ensure each user's Safari points at our stylesheet.
+# Runs `defaults` inside the user's GUI login session (launchctl asuser)
+# because com.apple.Safari is sandboxed: a bare `sudo -u` from a root daemon
+# does not reach the per-user container. Works only while the user is logged
+# in — which is fine, there is nothing to enforce when nobody is browsing.
+# If a preference had to be repaired, quit and relaunch that user's Safari so
+# the stylesheet takes effect again.
 # ---------------------------------------------------------------------------
 check_safari_prefs() {
     local expected_url="file://${CSS_PATH}"
-    local needs_flush=false
+    local user_home username uid plist_path changed
 
-    # Resolve the sandboxed Safari plist path for each real (non-root) user
-    # The watchdog runs as root, so we find actual users with a home in /Users
-    local user_home plist_path
+    # as_user CMD... — run CMD in the loop's current user login session.
+    # Relies on bash dynamic scope to read uid/username.
+    as_user() { launchctl asuser "$uid" sudo -u "$username" "$@"; }
+
     for user_home in /Users/*/; do
-        local username
         username="$(basename "$user_home")"
-        # Skip system-like directories
         [[ "$username" == "Shared" || "$username" == ".localized" ]] && continue
 
+        # No Safari container plist means this user never ran Safari
         plist_path="${user_home}${SAFARI_CONTAINER_RELATIVE}"
-        # If the container plist doesn't exist, this user hasn't run Safari
         [[ -f "$plist_path" ]] || continue
 
-        # --- UserStyleSheetEnabled ---
-        # Use domain name (not path) so macOS resolves the sandboxed container
-        local enabled
-        enabled="$(sudo -u "${username}" defaults read com.apple.Safari UserStyleSheetEnabled 2>/dev/null)"
+        uid="$(id -u "$username" 2>/dev/null)" || continue
+        changed=false
 
-        if [[ "$enabled" != "1" ]]; then
-            if sudo -u "${username}" defaults write com.apple.Safari UserStyleSheetEnabled -bool true 2>/dev/null; then
-                log "Safari prefs check: RESTORED UserStyleSheetEnabled for ${username} (was '${enabled:-missing}')"
-                needs_flush=true
-            else
-                log "Safari prefs check: FAILED to write UserStyleSheetEnabled for ${username} (Full Disk Access required)"
-            fi
+        if [[ "$(as_user defaults read com.apple.Safari UserStyleSheetEnabled 2>/dev/null)" != "1" ]]; then
+            as_user defaults write com.apple.Safari UserStyleSheetEnabled -bool true 2>/dev/null && changed=true
         fi
 
-        # --- UserStyleSheetLocationURLString ---
-        local current_url
-        current_url="$(sudo -u "${username}" defaults read com.apple.Safari UserStyleSheetLocationURLString 2>/dev/null)"
+        if [[ "$(as_user defaults read com.apple.Safari UserStyleSheetLocationURLString 2>/dev/null)" != "$expected_url" ]]; then
+            as_user defaults write com.apple.Safari UserStyleSheetLocationURLString "$expected_url" 2>/dev/null && changed=true
+        fi
 
-        if [[ "$current_url" != "$expected_url" ]]; then
-            if sudo -u "${username}" defaults write com.apple.Safari UserStyleSheetLocationURLString "$expected_url" 2>/dev/null; then
-                log "Safari prefs check: RESTORED UserStyleSheetLocationURLString for ${username} (was '${current_url:-missing}')"
-                needs_flush=true
-            else
-                log "Safari prefs check: FAILED to write UserStyleSheetLocationURLString for ${username} (Full Disk Access required)"
-            fi
+        # Quit ONLY this user's Safari when a pref was repaired, wait for it to
+        # exit, then relaunch it so browsing resumes with the stylesheet on.
+        if [[ "$changed" == true ]] && pgrep -u "$username" -x Safari &>/dev/null; then
+            pkill -u "$username" -x Safari 2>/dev/null
+            for _ in {1..10}; do
+                pgrep -u "$username" -x Safari &>/dev/null || break
+                sleep 0.5
+            done
+            as_user open -a Safari 2>/dev/null
         fi
     done
-
-    if [[ "$needs_flush" == true ]]; then
-        # Force-kill Safari so it reloads with the restored stylesheet.
-        # Without this, the user could keep browsing with the CSS disabled.
-        if pgrep -x Safari &>/dev/null; then
-            killall Safari 2>/dev/null
-            log "Safari prefs check: Safari force-quit to apply restored preferences"
-        fi
-    else
-        log "Safari prefs check: OK"
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# check_hosts — ensure every blocked domain is present in /etc/hosts
-# ---------------------------------------------------------------------------
-check_hosts() {
-    local hosts_file="/etc/hosts"
-    local any_added=false
-
-    for domain in "${HOSTS_DOMAINS[@]}"; do
-        # Use a word-boundary-aware grep to avoid partial matches
-        if ! grep -qE "^[[:space:]]*0\.0\.0\.0[[:space:]]+${domain}([[:space:]]|$)" "$hosts_file"; then
-            echo "0.0.0.0 ${domain}" >> "$hosts_file"
-            log "Hosts check: RESTORED 0.0.0.0 ${domain}"
-            any_added=true
-        fi
-    done
-
-    if [[ "$any_added" == false ]]; then
-        log "Hosts check: OK"
-    fi
-}
-
-# ---------------------------------------------------------------------------
-# flush_dns — clear the macOS DNS resolver cache
-# ---------------------------------------------------------------------------
-flush_dns() {
-    dscacheutil -flushcache
-    killall -HUP mDNSResponder 2>/dev/null
-    log "DNS flushed"
 }
 
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
-log "Watchdog started"
-
-check_expiry      # exits 0 if the block period has ended
+check_expiry
 check_css
 check_immutability
 check_safari_prefs
-check_hosts
-flush_dns
 
-log "Watchdog completed"
+exit 0

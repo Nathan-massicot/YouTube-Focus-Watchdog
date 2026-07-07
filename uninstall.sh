@@ -7,11 +7,10 @@
 #   2. Reads the expiration date from config.env
 #   3. Blocks uninstallation if the expiry date has not yet passed
 #   4. Unloads and removes the LaunchDaemon
-#   5. Removes the CSS (after stripping the immutable flag)
+#   5. Removes the CSS (live + backup, after stripping the immutable flag)
 #   6. Removes watchdog.sh and config.env
-#   7. Cleans /etc/hosts of the YouTube Focus block
-#   8. Resets Safari preferences
-#   9. Flushes DNS
+#   7. Resets Safari preferences for every account
+#   8. Removes any legacy /etc/hosts block left by older versions
 
 set -euo pipefail
 
@@ -21,15 +20,12 @@ set -euo pipefail
 
 DEST_ETC="/usr/local/etc/youtube-focus"
 DEST_CSS="${DEST_ETC}/youtube-focus.css"
+DEST_CSS_BACKUP="${DEST_ETC}/.youtube-focus.css.bak"
 DEST_CONFIG="${DEST_ETC}/config.env"
 DEST_WATCHDOG="/usr/local/bin/watchdog.sh"
 DEST_PLIST="/Library/LaunchDaemons/com.focus.youtube.watchdog.plist"
 
 DAEMON_LABEL="com.focus.youtube.watchdog"
-
-# /etc/hosts block markers (must match install.sh)
-HOSTS_MARKER_BEGIN="# BEGIN YouTube Focus"
-HOSTS_MARKER_END="# END YouTube Focus"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -83,7 +79,9 @@ fi
 
 # Source only the EXPIRY_DATE variable; avoid executing arbitrary code
 EXPIRY_DATE=""
-EXPIRY_DATE="$(grep -E '^EXPIRY_DATE=' "${DEST_CONFIG}" | head -1 | sed 's/^EXPIRY_DATE="\(.*\)"/\1/')"
+# Capture only the quoted value; `.*` after the closing quote swallows any
+# trailing comment (config.env keeps a comment on the EXPIRY_DATE line).
+EXPIRY_DATE="$(grep -E '^EXPIRY_DATE=' "${DEST_CONFIG}" | head -1 | sed -E 's/^EXPIRY_DATE="([^"]*)".*/\1/')"
 
 if [[ -z "${EXPIRY_DATE}" ]]; then
     die "Could not read EXPIRY_DATE from ${DEST_CONFIG}"
@@ -110,7 +108,7 @@ if [[ "${today_epoch}" -le "${expiry_epoch}" ]]; then
     printf '  Expiration date  : %s\n' "${EXPIRY_DATE}"
     printf '  Days remaining   : %d\n' "${days_remaining}"
     printf '\n'
-    printf '  Uninstallation will be allowed on or after %s.\n' "${EXPIRY_DATE}"
+    printf '  The block is active through %s; uninstallation unlocks the day after.\n' "${EXPIRY_DATE}"
     printf '\n'
     exit 1
 fi
@@ -138,16 +136,18 @@ fi
 remove_file "${DEST_PLIST}"
 
 # ---------------------------------------------------------------------------
-# Step 6 — Remove the immutable flag from the CSS, then delete it
+# Step 6 — Remove the immutable flag from the CSS files, then delete them
+# (both the live stylesheet and the immutable backup)
 # ---------------------------------------------------------------------------
 
-if [[ -f "${DEST_CSS}" ]]; then
-    chflags nouchg "${DEST_CSS}" || true
-    success "Immutable flag (uchg) removed from ${DEST_CSS}"
-    remove_file "${DEST_CSS}"
-else
-    warn "${DEST_CSS} not found — already removed, skipping"
-fi
+for css in "${DEST_CSS}" "${DEST_CSS_BACKUP}"; do
+    if [[ -f "$css" ]]; then
+        chflags nouchg "$css" 2>/dev/null || true
+        remove_file "$css"
+    else
+        warn "$css not found — already removed, skipping"
+    fi
+done
 
 # ---------------------------------------------------------------------------
 # Step 7 — Delete watchdog.sh
@@ -163,65 +163,52 @@ remove_file "${DEST_CONFIG}"
 remove_dir  "${DEST_ETC}"
 
 # ---------------------------------------------------------------------------
-# Step 9 — Clean /etc/hosts
+# Step 9 — Remove any legacy /etc/hosts block
+# Older versions DNS-blocked the avatar CDN here; current versions do not use
+# /etc/hosts at all. Strip the block (and flush DNS once) if an old install
+# left one behind.
 # ---------------------------------------------------------------------------
 
-if grep -qF "${HOSTS_MARKER_BEGIN}" /etc/hosts 2>/dev/null; then
-    python3 - /etc/hosts "${HOSTS_MARKER_BEGIN}" "${HOSTS_MARKER_END}" <<'PYEOF'
-import sys, pathlib
-
-hosts_path   = pathlib.Path(sys.argv[1])
-marker_begin = sys.argv[2]
-marker_end   = sys.argv[3]
-
-lines = hosts_path.read_text().splitlines(keepends=True)
-filtered = []
-inside = False
-for line in lines:
-    if line.strip() == marker_begin:
-        inside = True
-        continue
-    if line.strip() == marker_end:
-        inside = False
-        continue
-    if not inside:
-        filtered.append(line)
-
-hosts_path.write_text(''.join(filtered))
-PYEOF
-    success "/etc/hosts — YouTube Focus block removed"
+if grep -qF '# BEGIN YouTube Focus' /etc/hosts 2>/dev/null; then
+    sed -i '' '/# BEGIN YouTube Focus/,/# END YouTube Focus/d' /etc/hosts
+    dscacheutil -flushcache || true
+    killall -HUP mDNSResponder 2>/dev/null || true
+    success "/etc/hosts — legacy YouTube Focus block removed (DNS flushed)"
 else
-    warn "/etc/hosts — no YouTube Focus block found, skipping"
+    info "/etc/hosts — no legacy block found, nothing to clean"
 fi
 
 # ---------------------------------------------------------------------------
-# Step 10 — Reset Safari preferences
+# Step 10 — Reset Safari preferences for EVERY user the watchdog enforced
+# (the watchdog loops over /Users/*, so the uninstall must too — not just
+# the admin running this script). Writes go through launchctl asuser so the
+# sandboxed Safari container is reached; best-effort for logged-out users.
 # ---------------------------------------------------------------------------
 
-# Use the real (non-root) user who invoked sudo so we write into their
-# home directory, not root's.  Fall back to root if unavailable.
-REAL_USER="${SUDO_USER:-root}"
+SAFARI_CONTAINER_RELATIVE="Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist"
 
-info "Resetting Safari preferences for user '${REAL_USER}'..."
+info "Resetting Safari preferences for all users..."
 
-if sudo -u "${REAL_USER}" defaults read com.apple.Safari UserStyleSheetEnabled &>/dev/null; then
-    sudo -u "${REAL_USER}" defaults write com.apple.Safari UserStyleSheetEnabled -bool false
-    sudo -u "${REAL_USER}" defaults delete com.apple.Safari UserStyleSheetLocationURLString 2>/dev/null || true
-    success "Safari preferences reset for user '${REAL_USER}'"
-else
-    warn "No Safari UserStyleSheet preferences found — skipping reset"
+prefs_reset=0
+for user_home in /Users/*/; do
+    username="$(basename "${user_home}")"
+    [[ "${username}" == "Shared" || "${username}" == ".localized" ]] && continue
+    [[ -f "${user_home}${SAFARI_CONTAINER_RELATIVE}" ]] || continue
+    uid="$(id -u "${username}" 2>/dev/null)" || continue
+
+    launchctl asuser "${uid}" sudo -u "${username}" defaults write com.apple.Safari UserStyleSheetEnabled -bool false 2>/dev/null || true
+    launchctl asuser "${uid}" sudo -u "${username}" defaults delete com.apple.Safari UserStyleSheetLocationURLString 2>/dev/null || true
+    success "Safari preferences reset for user '${username}'"
+    prefs_reset=$((prefs_reset + 1))
+done
+
+if [[ "${prefs_reset}" -eq 0 ]]; then
+    warn "No Safari UserStyleSheet prefs found — nothing to reset"
+    warn "If the stylesheet is still active somewhere, turn it off in Safari → Settings → Advanced."
 fi
 
 # ---------------------------------------------------------------------------
-# Step 11 — Flush DNS
-# ---------------------------------------------------------------------------
-
-dscacheutil -flushcache
-killall -HUP mDNSResponder 2>/dev/null || true
-success "DNS cache flushed"
-
-# ---------------------------------------------------------------------------
-# Step 12 — Summary
+# Step 11 — Summary
 # ---------------------------------------------------------------------------
 
 printf '\n'
@@ -231,15 +218,14 @@ printf '\033[1;32m========================================\033[0m\n'
 printf '\n'
 printf '  Removed files:\n'
 printf '    %s\n' "${DEST_CSS}"
+printf '    %s\n' "${DEST_CSS_BACKUP}"
 printf '    %s\n' "${DEST_WATCHDOG}"
 printf '    %s\n' "${DEST_CONFIG}"
 printf '    %s\n' "${DEST_ETC}"
 printf '    %s\n' "${DEST_PLIST}"
 printf '\n'
-printf '  /etc/hosts       : YouTube Focus block removed\n'
-printf '  Safari prefs     : UserStyleSheetEnabled=false\n'
+printf '  Safari prefs     : UserStyleSheetEnabled=false (all users, best-effort)\n'
 printf '  LaunchDaemon     : %s unloaded and deleted\n' "${DAEMON_LABEL}"
-printf '  DNS cache        : flushed\n'
 printf '\n'
 printf '  YouTube is now fully unblocked. Good luck!\n'
 printf '\n'

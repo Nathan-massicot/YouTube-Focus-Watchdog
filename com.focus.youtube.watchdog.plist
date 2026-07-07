@@ -13,25 +13,38 @@
         <string>/usr/local/bin/watchdog.sh</string>
     </array>
 
-    <!-- Run immediately when the daemon is loaded (at boot) -->
+    <!-- Run once when the daemon is loaded (at boot) -->
     <key>RunAtLoad</key>
     <true/>
 
-    <!-- Re-run every 120 seconds (2 minutes) -->
+    <!-- Event-driven enforcement: launchd starts the watchdog ONLY when one
+         of these paths changes (created, modified, or deleted). No polling —
+         the watchdog is completely idle while you watch videos.
+         install.sh appends each user's sandboxed Safari preferences plist to
+         this array, so toggling the stylesheet off in Safari triggers an
+         immediate repair. -->
+    <key>WatchPaths</key>
+    <array>
+        <string>/usr/local/etc/youtube-focus/youtube-focus.css</string>
+        <string>/usr/local/etc/youtube-focus</string>
+    </array>
+
+    <!-- Safety net: one pass every 5 minutes catches anything WatchPaths
+         could miss (atomic-rename edge cases) and lets the EXPIRY_DATE
+         check take effect. One sub-second run per 5 minutes is
+         imperceptible. -->
     <key>StartInterval</key>
-    <integer>120</integer>
+    <integer>300</integer>
 
-    <!-- Stdout log file -->
-    <key>StandardOutPath</key>
-    <string>/var/log/youtube-focus.log</string>
+    <!-- Coalesce bursts of file events into at most one run per 5 seconds -->
+    <key>ThrottleInterval</key>
+    <integer>5</integer>
 
-    <!-- Stderr log file -->
-    <key>StandardErrorPath</key>
-    <string>/var/log/youtube-focus-error.log</string>
+    <!-- No log files: stdout/stderr go to /dev/null by default -->
 
-    <!-- Run as root (required to write to /etc/hosts) -->
+    <!-- Run as root (required to unlock/rewrite the immutable CSS and to write
+         each user's Safari prefs via launchctl asuser) -->
     <key>UserName</key>
     <string>root</string>
 </dict>
 </plist>
-

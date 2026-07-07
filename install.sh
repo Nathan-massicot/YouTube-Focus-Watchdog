@@ -5,11 +5,9 @@
 # This script:
 #   1. Validates the environment (sudo, source files present)
 #   2. Asks for an expiration date and validates it
-#   3. Generates the CSS hash and injects the base64 payload into watchdog.sh
-#   4. Writes EXPIRY_DATE and CSS_HASH into config.env
-#   5. Deploys all files to their system destinations
-#   6. Configures /etc/hosts and Safari preferences
-#   7. Loads the LaunchDaemon and runs the watchdog once immediately
+#   3. Deploys the CSS (live + immutable backup), watchdog, config, and plist
+#   4. Adds each user's Safari prefs plist to the daemon's WatchPaths
+#   5. Configures Safari preferences and loads the event-driven LaunchDaemon
 
 set -euo pipefail
 
@@ -29,16 +27,13 @@ SRC_PLIST="${SCRIPT_DIR}/com.focus.youtube.watchdog.plist"
 # System destinations
 DEST_ETC="/usr/local/etc/youtube-focus"
 DEST_CSS="${DEST_ETC}/youtube-focus.css"
+DEST_CSS_BACKUP="${DEST_ETC}/.youtube-focus.css.bak"
 DEST_CONFIG="${DEST_ETC}/config.env"
 DEST_WATCHDOG="/usr/local/bin/watchdog.sh"
 DEST_PLIST="/Library/LaunchDaemons/com.focus.youtube.watchdog.plist"
 
 # Daemon label (must match the Label key in the .plist)
 DAEMON_LABEL="com.focus.youtube.watchdog"
-
-# /etc/hosts block markers
-HOSTS_MARKER_BEGIN="# BEGIN YouTube Focus"
-HOSTS_MARKER_END="# END YouTube Focus"
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -89,7 +84,9 @@ EXPIRY_DATE=""
 
 while true; do
     printf '\nEnter the blocking expiration date (format YYYY-MM-DD): '
-    read -r EXPIRY_DATE
+    # `|| die` guards against EOF/piped stdin, which would otherwise make `read`
+    # return non-zero and silently abort the whole script under `set -e`.
+    read -r EXPIRY_DATE || die "No input received — run this installer interactively: sudo bash install.sh"
 
     # Validate format with a simple regex
     if [[ ! "$EXPIRY_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
@@ -119,225 +116,141 @@ days_until=$(( (expiry_epoch - today_epoch) / 86400 ))
 success "Expiration date set to ${EXPIRY_DATE} (${days_until} days from today)"
 
 # ---------------------------------------------------------------------------
-# Step 4 — Generate MD5 hash of the source CSS
+# Step 4 — Build the deployed config.env
+# EXPIRY_DATE is the only templated value; it was validated as YYYY-MM-DD
+# above, so it is safe to drop into the sed replacement. No python needed.
 # ---------------------------------------------------------------------------
 
-CSS_HASH="$(md5 -q "${SRC_CSS}")"
-[[ -n "$CSS_HASH" ]] || die "Failed to compute MD5 hash of ${SRC_CSS}"
-success "CSS MD5 hash: ${CSS_HASH}"
+CONFIG_TMP=""; PLIST_TMP=""
+trap 'rm -f "${CONFIG_TMP}" "${PLIST_TMP}"' EXIT
 
-# ---------------------------------------------------------------------------
-# Step 5 — Base64-encode the CSS and inject it into a temp copy of watchdog.sh
-# ---------------------------------------------------------------------------
-
-# Work on a temp copy so the source file is never modified
-WATCHDOG_TMP="$(mktemp /tmp/watchdog.XXXXXX.sh)"
-# Ensure the temp file is cleaned up on exit (success or failure)
-trap 'rm -f "${WATCHDOG_TMP}"' EXIT
-
-cp "${SRC_WATCHDOG}" "${WATCHDOG_TMP}"
-
-# Encode the CSS as a single-line base64 string (no line wrapping)
-CSS_BASE64="$(base64 -i "${SRC_CSS}" | tr -d '\n')"
-[[ -n "$CSS_BASE64" ]] || die "Failed to base64-encode ${SRC_CSS}"
-
-# Replace the placeholder line  CSS_BASE64=""  with the real payload.
-# We use a Python one-liner to do a safe literal replacement, avoiding any
-# sed delimiter conflicts caused by special characters in the base64 string.
-python3 - "${WATCHDOG_TMP}" "${CSS_BASE64}" <<'PYEOF'
-import sys, pathlib
-
-target = pathlib.Path(sys.argv[1])
-payload = sys.argv[2]
-old_line = 'CSS_BASE64=""'
-new_line = f'CSS_BASE64="{payload}"'
-
-content = target.read_text()
-if old_line not in content:
-    print(f"ERROR: marker '{old_line}' not found in {target}", file=sys.stderr)
-    sys.exit(1)
-
-target.write_text(content.replace(old_line, new_line, 1))
-PYEOF
-
-success "CSS base64 payload injected into watchdog (temp copy)"
-
-# ---------------------------------------------------------------------------
-# Step 6 — Write EXPIRY_DATE and CSS_HASH into a temp copy of config.env
-# ---------------------------------------------------------------------------
-
-CONFIG_TMP="$(mktemp /tmp/config.XXXXXX.env)"
-trap 'rm -f "${WATCHDOG_TMP}" "${CONFIG_TMP}"' EXIT
-
+CONFIG_TMP="$(mktemp /tmp/config.env.XXXXXX)"
 cp "${SRC_CONFIG}" "${CONFIG_TMP}"
+sed -i '' -E "s|^EXPIRY_DATE=\"[^\"]*\"|EXPIRY_DATE=\"${EXPIRY_DATE}\"|" "${CONFIG_TMP}"
+grep -q "^EXPIRY_DATE=\"${EXPIRY_DATE}\"" "${CONFIG_TMP}" \
+    || die "Failed to write EXPIRY_DATE into config.env"
 
-# Replace the EXPIRY_DATE value
-python3 - "${CONFIG_TMP}" "EXPIRY_DATE" "${EXPIRY_DATE}" <<'PYEOF'
-import sys, re, pathlib
-
-target = pathlib.Path(sys.argv[1])
-key    = sys.argv[2]
-value  = sys.argv[3]
-
-content = target.read_text()
-# Match:  KEY="anything"  or  KEY=anything  (with optional trailing comment)
-pattern = rf'^({re.escape(key)}=")[^"]*(")'
-replacement = rf'\g<1>{value}\2'
-new_content, n = re.subn(pattern, replacement, content, count=1, flags=re.MULTILINE)
-if n == 0:
-    print(f"ERROR: key '{key}' not found in {target}", file=sys.stderr)
-    sys.exit(1)
-target.write_text(new_content)
-PYEOF
-
-# Replace the CSS_HASH value
-python3 - "${CONFIG_TMP}" "CSS_HASH" "${CSS_HASH}" <<'PYEOF'
-import sys, re, pathlib
-
-target = pathlib.Path(sys.argv[1])
-key    = sys.argv[2]
-value  = sys.argv[3]
-
-content = target.read_text()
-pattern = rf'^({re.escape(key)}=")[^"]*(")'
-replacement = rf'\g<1>{value}\2'
-new_content, n = re.subn(pattern, replacement, content, count=1, flags=re.MULTILINE)
-if n == 0:
-    print(f"ERROR: key '{key}' not found in {target}", file=sys.stderr)
-    sys.exit(1)
-target.write_text(new_content)
-PYEOF
-
-success "EXPIRY_DATE and CSS_HASH written into config.env (temp copy)"
+success "EXPIRY_DATE written into config.env (temp copy)"
 
 # ---------------------------------------------------------------------------
-# Step 7 — Create destination directory and deploy the CSS file
+# Step 5 — Deploy the stylesheet: a live copy Safari loads + an immutable
+# backup the watchdog restores from. Both root-owned and locked with uchg.
 # ---------------------------------------------------------------------------
 
 if [[ ! -d "${DEST_ETC}" ]]; then
     step "Create ${DEST_ETC}" mkdir -p "${DEST_ETC}"
 fi
 
-# Remove immutable flag if the CSS already exists (re-install scenario)
-if [[ -f "${DEST_CSS}" ]]; then
-    chflags nouchg "${DEST_CSS}" 2>/dev/null || true
-fi
+# Unlock any pre-existing immutable copies (re-install scenario)
+for f in "${DEST_CSS}" "${DEST_CSS_BACKUP}"; do
+    if [[ -f "$f" ]]; then chflags nouchg "$f" 2>/dev/null || true; fi
+done
 
-step "Copy youtube-focus.css to ${DEST_ETC}" cp "${SRC_CSS}" "${DEST_CSS}"
-
-# ---------------------------------------------------------------------------
-# Step 8 — Apply immutable flag on the deployed CSS
-# ---------------------------------------------------------------------------
-
-step "Apply chflags uchg on CSS" chflags uchg "${DEST_CSS}"
+step "Copy youtube-focus.css to ${DEST_CSS}"        cp "${SRC_CSS}" "${DEST_CSS}"
+step "Copy backup stylesheet to ${DEST_CSS_BACKUP}" cp "${SRC_CSS}" "${DEST_CSS_BACKUP}"
+step "Apply chflags uchg on live CSS"               chflags uchg "${DEST_CSS}"
+step "Apply chflags uchg on backup CSS"             chflags uchg "${DEST_CSS_BACKUP}"
 
 # ---------------------------------------------------------------------------
-# Step 9 — Deploy the modified watchdog.sh
+# Step 6 — Deploy watchdog.sh verbatim (no payload injection: the immutable
+# backup above is the restore source, so the deployed script == the repo file).
 # ---------------------------------------------------------------------------
 
-step "Copy watchdog.sh to ${DEST_WATCHDOG}" cp "${WATCHDOG_TMP}" "${DEST_WATCHDOG}"
+step "Copy watchdog.sh to ${DEST_WATCHDOG}" cp "${SRC_WATCHDOG}" "${DEST_WATCHDOG}"
+step "chmod 755 watchdog.sh"                chmod 755 "${DEST_WATCHDOG}"
 
 # ---------------------------------------------------------------------------
-# Step 10 — Set executable permissions on watchdog.sh
+# Step 7 — Deploy config.env
 # ---------------------------------------------------------------------------
 
-step "chmod 755 watchdog.sh" chmod 755 "${DEST_WATCHDOG}"
+step "Copy config.env to ${DEST_CONFIG}" cp "${CONFIG_TMP}" "${DEST_CONFIG}"
 
 # ---------------------------------------------------------------------------
-# Step 11 — Deploy the modified config.env
+# Step 8 — Deploy the LaunchDaemon plist
+# The plist is event-driven (WatchPaths): launchd starts the watchdog only
+# when a watched file changes. Here we append each user's sandboxed Safari
+# preferences plist to WatchPaths so that toggling the stylesheet off in
+# Safari triggers an immediate repair. The path is added for EVERY home in
+# /Users — even if the plist does not exist yet (launchd arms the watch when
+# the file appears, e.g. after that account's first Safari launch). Accounts
+# created after install need a re-run of install.sh for instant repair; until
+# then the 5-minute safety net covers them. The relative path must mirror
+# SAFARI_CONTAINER_RELATIVE in config.env.
 # ---------------------------------------------------------------------------
 
-step "Copy config.env to ${DEST_ETC}" cp "${CONFIG_TMP}" "${DEST_CONFIG}"
+PLIST_TMP="$(mktemp /tmp/watchdog.plist.XXXXXX)"
+cp "${SRC_PLIST}" "${PLIST_TMP}"
 
-# ---------------------------------------------------------------------------
-# Step 12 — Deploy the LaunchDaemon plist
-# ---------------------------------------------------------------------------
+python3 - "${PLIST_TMP}" /Users/*/ <<'PYEOF'
+import sys, plistlib, pathlib
 
-step "Copy .plist to ${DEST_PLIST}" cp "${SRC_PLIST}" "${DEST_PLIST}"
+target = pathlib.Path(sys.argv[1])
+rel = 'Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist'
 
-# ---------------------------------------------------------------------------
-# Step 13 — Set correct ownership on the plist
-# ---------------------------------------------------------------------------
+with target.open('rb') as f:
+    plist = plistlib.load(f)
 
-step "chown root:wheel on .plist" chown root:wheel "${DEST_PLIST}"
-
-# ---------------------------------------------------------------------------
-# Step 14 — Set correct permissions on the plist
-# ---------------------------------------------------------------------------
-
-step "chmod 644 on .plist" chmod 644 "${DEST_PLIST}"
-
-# ---------------------------------------------------------------------------
-# Step 15 — Write /etc/hosts entries
-# ---------------------------------------------------------------------------
-
-# Source HOSTS_DOMAINS from the temp config (it is a bash array)
-# shellcheck source=/dev/null
-source "${CONFIG_TMP}"
-
-# Remove any pre-existing block in case this is a re-install, then append fresh entries.
-# We use a Python one-liner to strip everything between the markers (inclusive).
-python3 - /etc/hosts "${HOSTS_MARKER_BEGIN}" "${HOSTS_MARKER_END}" <<'PYEOF'
-import sys, pathlib
-
-hosts_path   = pathlib.Path(sys.argv[1])
-marker_begin = sys.argv[2]
-marker_end   = sys.argv[3]
-
-lines = hosts_path.read_text().splitlines(keepends=True)
-filtered = []
-inside = False
-for line in lines:
-    if line.strip() == marker_begin:
-        inside = True
+watch = plist.setdefault('WatchPaths', [])
+added = 0
+for home in sys.argv[2:]:
+    home_path = pathlib.Path(home.rstrip('/'))
+    if home_path.name in ('Shared', '.localized') or not home_path.is_dir():
         continue
-    if line.strip() == marker_end:
-        inside = False
-        continue
-    if not inside:
-        filtered.append(line)
+    p = str(home_path / rel)
+    if p not in watch:
+        watch.append(p)
+        added += 1
 
-hosts_path.write_text(''.join(filtered))
+with target.open('wb') as f:
+    plistlib.dump(plist, f)
+print(f"      Safari preference plists watched for {added} user account(s)")
 PYEOF
 
-# Build the new block and append it
-{
-    printf '\n%s\n' "${HOSTS_MARKER_BEGIN}"
-    for domain in "${HOSTS_DOMAINS[@]}"; do
-        printf '0.0.0.0 %s\n' "${domain}"
-    done
-    printf '%s\n' "${HOSTS_MARKER_END}"
-} >> /etc/hosts
+success "Safari preference plists added to WatchPaths"
 
-success "/etc/hosts entries written (${#HOSTS_DOMAINS[@]} domains)"
-
-# Flush DNS so the new entries take effect immediately
-dscacheutil -flushcache
-killall -HUP mDNSResponder 2>/dev/null || true
-success "DNS cache flushed"
+step "Copy .plist to ${DEST_PLIST}" cp "${PLIST_TMP}" "${DEST_PLIST}"
+step "chown root:wheel on .plist"   chown root:wheel "${DEST_PLIST}"
+step "chmod 644 on .plist"          chmod 644 "${DEST_PLIST}"
 
 # ---------------------------------------------------------------------------
-# Step 16 — Configure Safari preferences
+# Step 9 — Legacy /etc/hosts cleanup
+# Older versions DNS-blocked the avatar CDN here; this version does not touch
+# /etc/hosts at all (the CSS already greys avatars). Strip any stale block so
+# upgrading installs leave /etc/hosts clean.
+# ---------------------------------------------------------------------------
+
+if grep -qF '# BEGIN YouTube Focus' /etc/hosts 2>/dev/null; then
+    sed -i '' '/# BEGIN YouTube Focus/,/# END YouTube Focus/d' /etc/hosts
+    dscacheutil -flushcache || true
+    killall -HUP mDNSResponder 2>/dev/null || true
+    success "Removed legacy /etc/hosts block (no longer used)"
+fi
+
+# ---------------------------------------------------------------------------
+# Step 10 — Configure Safari preferences
 # ---------------------------------------------------------------------------
 
 # Determine the real (non-root) user who invoked sudo so we write prefs into
-# their home directory, not root's.  Fall back to root if unavailable.
+# their session, not root's.  Fall back to root if unavailable.
 REAL_USER="${SUDO_USER:-root}"
+REAL_UID="$(id -u "${REAL_USER}" 2>/dev/null || echo '')"
 
-# Use domain name (not path) so macOS resolves the sandboxed container automatically.
-# This requires Full Disk Access for the terminal — if it fails, the watchdog will
-# retry every 5 minutes once FDA is granted.
-if sudo -u "${REAL_USER}" defaults write com.apple.Safari UserStyleSheetEnabled -bool true 2>/dev/null \
-&& sudo -u "${REAL_USER}" defaults write com.apple.Safari UserStyleSheetLocationURLString "file://${DEST_CSS}" 2>/dev/null; then
+# Write inside the user's login session (launchctl asuser) so the sandboxed
+# com.apple.Safari container is reached — a bare `sudo -u` from root does not.
+# This is only a head start for the installing account; the watchdog re-applies
+# these prefs for whichever user is logged in (e.g. your dedicated Focus
+# account) whenever they drift, so a failure here is harmless.
+if [[ -n "${REAL_UID}" ]] \
+&& launchctl asuser "${REAL_UID}" sudo -u "${REAL_USER}" defaults write com.apple.Safari UserStyleSheetEnabled -bool true 2>/dev/null \
+&& launchctl asuser "${REAL_UID}" sudo -u "${REAL_USER}" defaults write com.apple.Safari UserStyleSheetLocationURLString "file://${DEST_CSS}" 2>/dev/null; then
     success "Safari preferences configured for user '${REAL_USER}'"
 else
-    warn "Could not write Safari preferences — your terminal needs Full Disk Access"
-    warn "Go to: System Settings → Privacy & Security → Full Disk Access → enable your terminal"
-    warn "The watchdog will configure Safari automatically once FDA is granted"
+    warn "Could not pre-configure Safari for '${REAL_USER}' (not in a GUI session?) — harmless:"
+    warn "the watchdog sets UserStyleSheetEnabled automatically for any logged-in user."
 fi
 
 # ---------------------------------------------------------------------------
-# Step 17 — Load the LaunchDaemon (handle re-install gracefully)
+# Step 11 — Load the LaunchDaemon (handle re-install gracefully)
 # ---------------------------------------------------------------------------
 
 # If the daemon is already loaded, unload it first before re-loading.
@@ -347,24 +260,36 @@ if launchctl list "${DAEMON_LABEL}" &>/dev/null; then
         launchctl bootout system/"${DAEMON_LABEL}" 2>/dev/null || true
 fi
 
-step "Load daemon with launchctl bootstrap" \
-    launchctl bootstrap system "${DEST_PLIST}"
+# Bootstrap right after a bootout can fail transiently — retry briefly
+daemon_loaded=false
+for _ in 1 2 3; do
+    if launchctl bootstrap system "${DEST_PLIST}" 2>/dev/null; then
+        daemon_loaded=true
+        break
+    fi
+    sleep 1
+done
+if [[ "${daemon_loaded}" == true ]]; then
+    success "Load daemon with launchctl bootstrap"
+else
+    die "Load daemon with launchctl bootstrap — command failed: launchctl bootstrap system ${DEST_PLIST}"
+fi
 
-success "LaunchDaemon '${DAEMON_LABEL}' loaded and will start at every boot"
+success "LaunchDaemon '${DAEMON_LABEL}' loaded — event-driven, starts at every boot"
 
 # ---------------------------------------------------------------------------
-# Step 18 — Run watchdog.sh once immediately
+# Step 12 — Run watchdog.sh once immediately
 # ---------------------------------------------------------------------------
 
 info "Running watchdog.sh once immediately..."
 if /bin/bash "${DEST_WATCHDOG}"; then
     success "Initial watchdog run completed"
 else
-    warn "Initial watchdog run exited with a non-zero status (check /var/log/youtube-focus.log)"
+    warn "Initial watchdog run exited with a non-zero status"
 fi
 
 # ---------------------------------------------------------------------------
-# Step 19 — Summary
+# Step 13 — Summary
 # ---------------------------------------------------------------------------
 
 printf '\n'
@@ -373,19 +298,24 @@ printf '\033[1;32m  YouTube Focus Watchdog — Installed\033[0m\n'
 printf '\033[1;32m========================================\033[0m\n'
 printf '\n'
 printf '  Expiration date  : %s (%d days)\n' "${EXPIRY_DATE}" "${days_until}"
-printf '  CSS MD5 hash     : %s\n' "${CSS_HASH}"
 printf '\n'
 printf '  Deployed files:\n'
-printf '    %-45s  %s\n' "${DEST_CSS}"       "immutable (uchg)"
-printf '    %-45s  %s\n' "${DEST_WATCHDOG}"  "chmod 755"
-printf '    %-45s  %s\n' "${DEST_CONFIG}"    "config"
-printf '    %-45s  %s\n' "${DEST_PLIST}"     "root:wheel 644"
+printf '    %-48s  %s\n' "${DEST_CSS}"        "immutable (uchg)"
+printf '    %-48s  %s\n' "${DEST_CSS_BACKUP}" "immutable backup (uchg)"
+printf '    %-48s  %s\n' "${DEST_WATCHDOG}"   "chmod 755"
+printf '    %-48s  %s\n' "${DEST_CONFIG}"     "config"
+printf '    %-48s  %s\n' "${DEST_PLIST}"      "root:wheel 644"
 printf '\n'
-printf '  /etc/hosts       : %d domains blocked\n' "${#HOSTS_DOMAINS[@]}"
 printf '  Safari prefs     : UserStyleSheetEnabled=true\n'
 printf '  LaunchDaemon     : %s\n' "${DAEMON_LABEL}"
-printf '  Log              : /var/log/youtube-focus.log\n'
 printf '\n'
-printf '  The watchdog runs every 2 minutes and self-heals any tampering.\n'
-printf '  To monitor: tail -f /var/log/youtube-focus.log\n'
+printf '  The watchdog is event-driven: it reacts instantly when a protected\n'
+printf '  file changes and is otherwise completely idle (5-min safety net).\n'
+printf '\n'
+printf '\033[1;33m  IMPORTANT — to make the block hard to disable:\033[0m\n'
+printf '    Do your browsing in a STANDARD (non-admin) macOS account.\n'
+printf '    There you cannot stop the daemon or unlock the CSS.\n'
+printf '    In that account, set the stylesheet once via:\n'
+printf '      Safari → Settings → Advanced → Style sheet → Other… → %s\n' "${DEST_CSS}"
+printf '    Keep your admin account for administration only.\n'
 printf '\n'

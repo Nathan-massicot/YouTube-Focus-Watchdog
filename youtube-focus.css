@@ -6,7 +6,7 @@
  * Sections:
  *   1. Homepage recommendation grid
  *   2. Recommended video titles
- *   3. Thumbnails (replaced with grey boxes)
+ *   3. Thumbnails (replaced with grey boxes; search results excepted)
  *   4. Shorts (shelf, navigation entry, standalone page)
  *   5. Up Next sidebar on video pages
  *   6. End screens (end-of-video overlay suggestions)
@@ -15,6 +15,8 @@
  *
  * Intentionally preserved:
  *   - Search bar (#search, ytd-searchbox)
+ *   - Search result thumbnails (ytd-video-renderer) — shown so that
+ *     an intentional search stays usable; only the title is hidden
  *   - Video player (#movie_player, .html5-video-player)
  *   - Subscriptions feed (/feed/subscriptions) — rules are scoped
  *     so that the subscriptions page is not targeted
@@ -25,7 +27,9 @@
  *
  * Selector coverage: both the "classic" Polymer (ytd-*) layout
  * and the newer inner-tube / masthead variants used from 2023 onward.
- * Tested against the YouTube DOM as of early 2026.
+ * Section 6 verified against the live player build (0053e6c9,
+ * July 2026); the rest tested against the YouTube DOM as of
+ * early 2026.
  */
 
 
@@ -107,16 +111,22 @@ ytd-compact-video-renderer ytd-video-meta-block {
 
 
 /* ============================================================
-   3. THUMBNAILS — CSS FALLBACK (grey placeholder boxes)
-   DNS blocking (i.ytimg.com) handles the network level.
-   These rules replace any thumbnail that does load with a
-   neutral grey rectangle, preventing visual temptation.
+   3. THUMBNAILS — grey placeholder boxes (CSS only)
+   Thumbnails are handled entirely in CSS (no network-level
+   blocking): these rules alone replace recommendation
+   thumbnails with a neutral grey rectangle, preventing visual
+   temptation.
+
+   EXCEPTION: search results (ytd-video-renderer) keep their
+   real thumbnails so that an intentional search stays usable.
+   Only the *recommendation* surfaces (homepage rich-grid,
+   sidebar/Up-Next compact renderers, channel grids, playlists)
+   are greyed out below.
    ============================================================ */
 
 /* Thumbnail containers in the rich-grid and compact renderers */
 ytd-rich-item-renderer ytd-thumbnail,
 ytd-compact-video-renderer ytd-thumbnail,
-ytd-video-renderer ytd-thumbnail,
 ytd-grid-video-renderer ytd-thumbnail,
 ytd-compact-playlist-renderer ytd-thumbnail,
 ytd-compact-radio-renderer ytd-thumbnail,
@@ -127,7 +137,6 @@ ytd-playlist-video-renderer ytd-thumbnail {
 /* Hide the actual <img> inside every recommendation thumbnail */
 ytd-rich-item-renderer ytd-thumbnail img,
 ytd-compact-video-renderer ytd-thumbnail img,
-ytd-video-renderer ytd-thumbnail img,
 ytd-grid-video-renderer ytd-thumbnail img,
 ytd-compact-playlist-renderer ytd-thumbnail img,
 ytd-compact-radio-renderer ytd-thumbnail img,
@@ -143,17 +152,17 @@ ytd-compact-video-renderer yt-image {
     display: none !important;
 }
 
-/* Duration badge overlaid on thumbnails */
+/* Duration badge overlaid on thumbnails
+   (search results keep their badge — see the section 3 EXCEPTION) */
 ytd-rich-item-renderer ytd-thumbnail-overlay-time-status-renderer,
-ytd-compact-video-renderer ytd-thumbnail-overlay-time-status-renderer,
-ytd-video-renderer ytd-thumbnail-overlay-time-status-renderer {
+ytd-compact-video-renderer ytd-thumbnail-overlay-time-status-renderer {
     display: none !important;
 }
 
-/* Newer yt-image web component used in the 2024+ layout */
+/* Newer yt-image web component used in the 2024+ layout
+   (search results keep their image — see the section 3 EXCEPTION) */
 ytd-rich-item-renderer yt-image img,
-ytd-compact-video-renderer yt-image img,
-ytd-video-renderer yt-image img {
+ytd-compact-video-renderer yt-image img {
     opacity: 0 !important;
 }
 
@@ -162,45 +171,45 @@ ytd-video-renderer yt-image img {
    4. SHORTS — shelf, navigation entry, standalone page
    Covers: homepage shelf, sidebar entry, search shelf,
    subscriptions feed injection, and the /shorts/* URL.
+
+   PERFORMANCE NOTE: deliberately free of :has(). WebKit
+   re-checks :has() arguments whenever classes/attributes
+   mutate, and YouTube's player DOM mutates constantly during
+   playback — :has() rules here caused style-recalc jank
+   (video/audio stutter). Cards that could only be matched via
+   :has() are neutralized instead by hiding their Shorts
+   content; their containers are already hidden or greyed by
+   sections 1, 3 and 5.
    ============================================================ */
 
-/* Shorts shelf on the homepage and search results */
+/* Shorts shelves on the homepage, search results, and channels */
 ytd-reel-shelf-renderer,
-ytd-rich-section-renderer:has(ytd-rich-shelf-renderer[is-shorts]),
 ytd-rich-shelf-renderer[is-shorts] {
     display: none !important;
 }
 
-/* Shorts items injected into the rich-grid (individual cards) */
-ytd-rich-item-renderer:has([overlay-style="SHORTS"]),
-ytd-grid-video-renderer:has([overlay-style="SHORTS"]),
-ytd-video-renderer:has([overlay-style="SHORTS"]) {
+/* Shorts overlay/badge content inside any video card — the
+   cards themselves are hidden (home grid, sidebar) or greyed
+   with hidden titles (search, channel grids) by sections 1-3 */
+ytd-rich-item-renderer [overlay-style="SHORTS"],
+ytd-grid-video-renderer [overlay-style="SHORTS"],
+ytd-video-renderer [overlay-style="SHORTS"],
+ytd-compact-video-renderer [overlay-style="SHORTS"] {
     display: none !important;
 }
 
-/* Shorts items in the compact sidebar renderer */
-ytd-compact-video-renderer:has([overlay-style="SHORTS"]) {
+/* Left-rail navigation — hide the "Shorts" link itself */
+ytd-guide-entry-renderer a[title="Shorts"],
+ytd-mini-guide-entry-renderer a[title="Shorts"] {
     display: none !important;
 }
 
-/* Left-rail navigation entry — "Shorts" with the icon */
-ytd-guide-entry-renderer:has(a[title="Shorts"]),
-ytd-guide-entry-renderer:has([title="Shorts"]),
-ytd-mini-guide-entry-renderer:has(a[title="Shorts"]),
-ytd-mini-guide-entry-renderer:has([title="Shorts"]) {
-    display: none !important;
-}
+/* NOTE: no separate "Shorts on a channel page" rule — the bare
+   ytd-reel-shelf-renderer rule above already matches it anywhere. */
 
-/* Shorts section on a channel's page */
-ytd-browse ytd-reel-shelf-renderer,
-ytd-browse ytd-rich-section-renderer ytd-reel-shelf-renderer {
-    display: none !important;
-}
-
-/* Standalone /shorts/* page — hide the player chrome that
-   auto-advances to the next Short */
-ytd-shorts,
-ytd-shorts #shorts-container {
+/* Standalone /shorts/* page — hide the auto-advancing player
+   (ytd-shorts covers #shorts-container, its child) */
+ytd-shorts {
     display: none !important;
 }
 
@@ -210,10 +219,9 @@ ytd-reel-video-renderer {
     display: none !important;
 }
 
-/* Shorts chip in the search filter bar */
-yt-chip-cloud-chip-renderer:has(a[href*="sp=EgIQAQ"]) {
-    display: none !important;
-}
+/* NOTE: no dedicated rule for the Shorts chip in the filter
+   bar — section 7 already hides every chip
+   (yt-chip-cloud-chip-renderer). */
 
 
 /* ============================================================
@@ -238,12 +246,34 @@ ytd-compact-autoplay-renderer,
 
 
 /* ============================================================
-   6. END SCREENS (end-of-video overlay suggestions)
-   Hides the clickable suggestion tiles that appear over the
-   last 20 seconds of a video.
+   6. END SCREENS (end-of-video "next video" propositions)
+   Three surfaces coexist in the 2026 player, all hidden here:
+     a. Creator end cards over the last ~20s (.ytp-ce-*)
+     b. The videowall grid once playback ends — the legacy
+        generation (.ytp-endscreen-content) AND the modern skin
+        that replaced it around Nov 2025 (.ytp-modern-*,
+        .ytp-suggestion-set), plus the new fullscreen grid
+     c. The autonav end screen — countdown card when autoplay is
+        on, "More videos" suggestion strip when it is off — which
+        is appended to #movie_player as a SIBLING of
+        .html5-endscreen, so the videowall rules never match it
+   Verified against the live player build (0053e6c9, 2026-07).
+
+   DO NOT hide the player-root STATE classes (.ended-mode,
+   .ytp-autonav-endscreen-cancelled-state, .ytp-delhi-modern,
+   .ytp-fullscreen-grid-active, .ytp-fullscreen-grid-peeking) or
+   bare .ytp-player-content — they sit on / are shared with the
+   player itself and hiding them blanks the video. The autoplay
+   toggle and the countdown Cancel button are never targeted on
+   their own: hiding a parent overlay hides them anyway, and in
+   an A/B variant where only the button matched, the user would
+   face a running countdown with no way to cancel it.
    ============================================================ */
 
-/* End-screen element tiles (video + playlist suggestions) */
+/* a. Creator end-card tiles (video/playlist/channel) and the
+   mid-video cards teaser. display:none already removes them
+   from layout and events, so no opacity/pointer-events
+   overrides are needed. */
 .ytp-ce-element,
 .ytp-ce-covering-overlay,
 .ytp-ce-element-shadow,
@@ -251,21 +281,67 @@ ytd-compact-autoplay-renderer,
 .ytp-ce-expanding-image,
 .ytp-ce-video,
 .ytp-ce-playlist,
-.ytp-ce-channel {
+.ytp-ce-channel,
+.ytp-cards-teaser {
     display: none !important;
-    opacity: 0 !important;
-    pointer-events: none !important;
 }
 
-/* End-screen grid container */
+/* b. Videowall — legacy grid and container (pre-Nov-2025 skin,
+   still shipped and A/B-served) */
 .ytp-endscreen-content,
-.html5-endscreen {
-    display: none !important;
-}
-
-/* End-screen panels in the newer 2024+ player */
+.html5-endscreen,
 .ytp-player-content .videowall-endscreen,
 .videowall-endscreen {
+    display: none !important;
+}
+
+/* b. Videowall — modern skin (Nov 2025+): renamed container,
+   grid and tiles, takeover mode, and the pager arrows */
+.modern-videowall-endscreen,
+.ytp-modern-endscreen-content,
+.ytp-modern-videowall-still,
+.ytp-suggestion-set,
+.ytp-endscreen-takeover,
+.ytp-endscreen-paginate,
+.ytp-endscreen-previous,
+.ytp-endscreen-next {
+    display: none !important;
+}
+
+/* b. Fullscreen "more videos" grid (2025+ player UI) that peeks
+   up when a video ends or is paused in fullscreen */
+.ytp-fullscreen-grid,
+.ytp-fullscreen-grid-stills-container,
+.ytp-fullscreen-grid-expand-button {
+    display: none !important;
+}
+
+/* c. Autonav end screen — the "Up next" countdown card (autoplay
+   on) and the "More videos" suggestion strip (autoplay off or
+   cancelled), in both the legacy (.ytp-upnext) and modern
+   (.ytp-autonav-endscreen-*) implementations, plus their scrim
+   layers and suggestion-tile containers. NOTE: hiding the
+   countdown does not stop autoplay navigation itself — the
+   autoplay toggle in the control bar stays visible so it can be
+   turned off. */
+.ytp-upnext,
+.ytp-autonav-endscreen-countdown-overlay,
+.ytp-autonav-endscreen-countdown-container,
+.ytp-autonav-endscreen-upnext-container,
+.ytp-autonav-endscreen-more-videos,
+.ytp-autonav-overlay,
+.ytp-autonav-overlay-cancelled-state,
+.ytp-autonav-list-overlay,
+.ytp-suggestions-container {
+    display: none !important;
+}
+
+/* "More videos" panel shown while PAUSED (same recommendation
+   surface as the end screen), and the embed-player "Watch again
+   on YouTube" more-videos strip — a Safari user stylesheet also
+   applies inside youtube.com embed iframes */
+.ytp-pause-overlay,
+.ytp-watch-again-on-youtube-endscreen-more-videos-container {
     display: none !important;
 }
 
