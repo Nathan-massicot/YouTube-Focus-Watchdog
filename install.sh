@@ -1,5 +1,5 @@
 #!/bin/bash
-# YouTube Focus Watchdog — One-command installer for macOS
+# YouTube Full Focus — One-command installer for macOS
 # Usage: sudo bash install.sh
 #
 # This script:
@@ -57,6 +57,40 @@ step() {
 }
 
 # ---------------------------------------------------------------------------
+# Command-line options
+# The installer runs unattended when an expiration date is supplied up front —
+# that is how YouTube Full Focus.app drives it, since a GUI has no stdin to prompt
+# on. Without one, Step 3 falls back to the interactive prompt as before.
+# ---------------------------------------------------------------------------
+
+usage() {
+    cat <<'USAGE'
+YouTube Full Focus — installer
+
+Usage:
+  sudo bash install.sh                       Interactive (prompts for the date)
+  sudo bash install.sh --expiry YYYY-MM-DD   Unattended
+  YTF_EXPIRY_DATE=YYYY-MM-DD sudo -E bash install.sh
+
+Options:
+  --expiry DATE   Enforcement end date, YYYY-MM-DD. Must be a real future date.
+  -h, --help      Show this help and exit.
+USAGE
+}
+
+# Seed from the environment so `sudo -E` / launchd-style invocations work too.
+EXPIRY_DATE="${YTF_EXPIRY_DATE:-}"
+
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        --expiry)   EXPIRY_DATE="${2:-}"; shift 2 ;;
+        --expiry=*) EXPIRY_DATE="${1#*=}"; shift ;;
+        -h|--help)  usage; exit 0 ;;
+        *)          usage >&2; die "Unknown option: $1" ;;
+    esac
+done
+
+# ---------------------------------------------------------------------------
 # Step 1 — Verify sudo
 # ---------------------------------------------------------------------------
 
@@ -77,42 +111,61 @@ done
 success "All source files found"
 
 # ---------------------------------------------------------------------------
-# Step 3 — Ask for expiration date
+# Step 3 — Determine the expiration date
+# Validation is shared by both entry points: the --expiry flag (unattended,
+# used by the app) and the interactive prompt. On success it exports
+# today_epoch / expiry_epoch / days_until for the steps below.
 # ---------------------------------------------------------------------------
 
-EXPIRY_DATE=""
+# validate_expiry DATE — return 0 when DATE is a real future YYYY-MM-DD date and
+# set today_epoch / expiry_epoch / days_until for the caller. On failure it sets
+# VALIDATION_ERROR and returns 1. The result is deliberately NOT passed back
+# through stdout: a command substitution would run this in a subshell and the
+# epoch variables would never reach the caller.
+VALIDATION_ERROR=""
+validate_expiry() {
+    local candidate="$1" normalized
+    VALIDATION_ERROR=""
 
-while true; do
-    printf '\nEnter the blocking expiration date (format YYYY-MM-DD): '
-    # `|| die` guards against EOF/piped stdin, which would otherwise make `read`
-    # return non-zero and silently abort the whole script under `set -e`.
-    read -r EXPIRY_DATE || die "No input received — run this installer interactively: sudo bash install.sh"
-
-    # Validate format with a simple regex
-    if [[ ! "$EXPIRY_DATE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
-        warn "Invalid format. Expected YYYY-MM-DD (e.g. 2026-09-01). Please try again."
-        continue
+    if [[ ! "$candidate" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]]; then
+        VALIDATION_ERROR="Invalid format. Expected YYYY-MM-DD (e.g. 2026-09-01)."
+        return 1
     fi
 
-    # Validate that the date is a real calendar date (macOS date -j)
-    if ! date -j -f '%Y-%m-%d' "$EXPIRY_DATE" '+%s' &>/dev/null; then
-        warn "Date '$EXPIRY_DATE' is not a valid calendar date. Please try again."
-        continue
+    # macOS `date -j` silently rolls impossible dates over (2026-02-31 parses as
+    # 2026-03-03), so parse and reformat, then insist the round trip is stable.
+    if ! normalized="$(date -j -f '%Y-%m-%d' "$candidate" '+%Y-%m-%d' 2>/dev/null)" \
+       || [[ "$normalized" != "$candidate" ]]; then
+        VALIDATION_ERROR="Date '$candidate' is not a valid calendar date."
+        return 1
     fi
 
-    # Validate that the date is strictly in the future
     today_epoch="$(date -j -f '%Y-%m-%d' "$(date '+%Y-%m-%d')" '+%s')"
-    expiry_epoch="$(date -j -f '%Y-%m-%d' "$EXPIRY_DATE" '+%s')"
+    expiry_epoch="$(date -j -f '%Y-%m-%d' "$candidate" '+%s')"
 
     if [[ "$expiry_epoch" -le "$today_epoch" ]]; then
-        warn "Date '$EXPIRY_DATE' is today or in the past. The expiration date must be in the future."
-        continue
+        VALIDATION_ERROR="Date '$candidate' is today or in the past. The expiration date must be in the future."
+        return 1
     fi
 
-    break
-done
+    days_until=$(( (expiry_epoch - today_epoch) / 86400 ))
+    return 0
+}
 
-days_until=$(( (expiry_epoch - today_epoch) / 86400 ))
+if [[ -n "${EXPIRY_DATE}" ]]; then
+    # Unattended: a bad date is fatal, there is nobody to re-prompt.
+    validate_expiry "${EXPIRY_DATE}" || die "--expiry rejected: ${VALIDATION_ERROR}"
+else
+    while true; do
+        printf '\nEnter the blocking expiration date (format YYYY-MM-DD): '
+        # `|| die` guards against EOF/piped stdin, which would otherwise make
+        # `read` return non-zero and silently abort the whole script under -e.
+        read -r EXPIRY_DATE || die "No input received — run this installer interactively (sudo bash install.sh) or pass --expiry YYYY-MM-DD"
+
+        validate_expiry "${EXPIRY_DATE}" && break
+        warn "${VALIDATION_ERROR} Please try again."
+    done
+fi
 success "Expiration date set to ${EXPIRY_DATE} (${days_until} days from today)"
 
 # ---------------------------------------------------------------------------
@@ -165,6 +218,13 @@ step "chmod 755 watchdog.sh"                chmod 755 "${DEST_WATCHDOG}"
 
 step "Copy config.env to ${DEST_CONFIG}" cp "${CONFIG_TMP}" "${DEST_CONFIG}"
 
+# mktemp created CONFIG_TMP as 0600 and cp carries that mode over. Widen it so
+# YouTube Full Focus.app can read EXPIRY_DATE to display status without asking for a
+# password. Root-owned and world-readable is fine: the file holds no secret,
+# only the end date, and a non-root user still cannot write it.
+step "chown root:wheel on config.env" chown root:wheel "${DEST_CONFIG}"
+step "chmod 644 on config.env"        chmod 644 "${DEST_CONFIG}"
+
 # ---------------------------------------------------------------------------
 # Step 8 — Deploy the LaunchDaemon plist
 # The plist is event-driven (WatchPaths): launchd starts the watchdog only
@@ -181,30 +241,33 @@ step "Copy config.env to ${DEST_CONFIG}" cp "${CONFIG_TMP}" "${DEST_CONFIG}"
 PLIST_TMP="$(mktemp /tmp/watchdog.plist.XXXXXX)"
 cp "${SRC_PLIST}" "${PLIST_TMP}"
 
-python3 - "${PLIST_TMP}" /Users/*/ <<'PYEOF'
-import sys, plistlib, pathlib
+# Enumerate accounts with PlistBuddy rather than python3: on a stock Mac
+# /usr/bin/python3 is a Command Line Tools stub that pops an "install developer
+# tools" dialog and fails, which would break the app-driven install. PlistBuddy
+# ships with every macOS.
+SAFARI_CONTAINER_RELATIVE="Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist"
 
-target = pathlib.Path(sys.argv[1])
-rel = 'Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist'
+watched=0
+for user_home in /Users/*/; do
+    username="$(basename "${user_home}")"
+    [[ "${username}" == "Shared" || "${username}" == ".localized" ]] && continue
+    [[ -d "${user_home}" ]] || continue
 
-with target.open('rb') as f:
-    plist = plistlib.load(f)
+    watch_path="${user_home}${SAFARI_CONTAINER_RELATIVE}"
 
-watch = plist.setdefault('WatchPaths', [])
-added = 0
-for home in sys.argv[2:]:
-    home_path = pathlib.Path(home.rstrip('/'))
-    if home_path.name in ('Shared', '.localized') or not home_path.is_dir():
+    # PLIST_TMP is a fresh copy of the repo plist (two /usr/local paths only),
+    # so a user path can never already be there — checked anyway to stay
+    # idempotent if the source plist ever ships one.
+    if /usr/libexec/PlistBuddy -c 'Print :WatchPaths' "${PLIST_TMP}" 2>/dev/null | grep -qF "${watch_path}"; then
         continue
-    p = str(home_path / rel)
-    if p not in watch:
-        watch.append(p)
-        added += 1
+    fi
 
-with target.open('wb') as f:
-    plistlib.dump(plist, f)
-print(f"      Safari preference plists watched for {added} user account(s)")
-PYEOF
+    /usr/libexec/PlistBuddy -c "Add :WatchPaths: string ${watch_path}" "${PLIST_TMP}" >/dev/null \
+        || die "Failed to add ${watch_path} to the daemon's WatchPaths"
+    watched=$(( watched + 1 ))
+done
+
+printf '      Safari preference plists watched for %d user account(s)\n' "${watched}"
 
 success "Safari preference plists added to WatchPaths"
 
@@ -232,7 +295,10 @@ fi
 
 # Determine the real (non-root) user who invoked sudo so we write prefs into
 # their session, not root's.  Fall back to root if unavailable.
-REAL_USER="${SUDO_USER:-root}"
+# `do shell script … with administrator privileges` — how the app installs —
+# sets no SUDO_USER, so fall back to whoever owns the console (the person at
+# the GUI) before giving up and using root.
+REAL_USER="${SUDO_USER:-$(stat -f '%Su' /dev/console 2>/dev/null || echo root)}"
 REAL_UID="$(id -u "${REAL_USER}" 2>/dev/null || echo '')"
 
 # Write inside the user's login session (launchctl asuser) so the sandboxed
@@ -294,7 +360,7 @@ fi
 
 printf '\n'
 printf '\033[1;32m========================================\033[0m\n'
-printf '\033[1;32m  YouTube Focus Watchdog — Installed\033[0m\n'
+printf '\033[1;32m  YouTube Full Focus — Installed\033[0m\n'
 printf '\033[1;32m========================================\033[0m\n'
 printf '\n'
 printf '  Expiration date  : %s (%d days)\n' "${EXPIRY_DATE}" "${days_until}"

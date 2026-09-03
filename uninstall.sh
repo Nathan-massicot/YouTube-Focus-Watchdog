@@ -1,5 +1,5 @@
 #!/bin/bash
-# YouTube Focus Watchdog — Uninstaller for macOS
+# YouTube Full Focus — Uninstaller for macOS
 # Usage: sudo bash uninstall.sh
 #
 # This script:
@@ -74,7 +74,7 @@ info "Running as root — OK"
 # ---------------------------------------------------------------------------
 
 if [[ ! -f "${DEST_CONFIG}" ]]; then
-    die "config.env not found at ${DEST_CONFIG} — is YouTube Focus actually installed?"
+    die "config.env not found at ${DEST_CONFIG} — is YouTube Full Focus actually installed?"
 fi
 
 # Source only the EXPIRY_DATE variable; avoid executing arbitrary code
@@ -173,7 +173,7 @@ if grep -qF '# BEGIN YouTube Focus' /etc/hosts 2>/dev/null; then
     sed -i '' '/# BEGIN YouTube Focus/,/# END YouTube Focus/d' /etc/hosts
     dscacheutil -flushcache || true
     killall -HUP mDNSResponder 2>/dev/null || true
-    success "/etc/hosts — legacy YouTube Focus block removed (DNS flushed)"
+    success "/etc/hosts — legacy block removed (DNS flushed)"
 else
     info "/etc/hosts — no legacy block found, nothing to clean"
 fi
@@ -213,7 +213,7 @@ fi
 
 printf '\n'
 printf '\033[1;32m========================================\033[0m\n'
-printf '\033[1;32m  YouTube Focus Watchdog — Uninstalled\033[0m\n'
+printf '\033[1;32m  YouTube Full Focus — Uninstalled\033[0m\n'
 printf '\033[1;32m========================================\033[0m\n'
 printf '\n'
 printf '  Removed files:\n'

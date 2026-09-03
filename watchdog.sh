@@ -1,5 +1,5 @@
 #!/bin/bash
-# YouTube Focus Watchdog — self-healing enforcement script.
+# YouTube Full Focus — self-healing enforcement script.
 # Launched by launchd ONLY when a watched file changes (WatchPaths), plus one
 # safety-net pass every 5 minutes — never on a tight polling loop, so it adds
 # zero load while videos play. Each check repairs only when drift is found.

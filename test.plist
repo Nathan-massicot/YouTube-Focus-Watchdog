@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>Label</key>
+	<string>com.focus.youtube.watchdog</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/bin/bash</string>
+		<string>/usr/local/bin/watchdog.sh</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StartInterval</key>
+	<integer>300</integer>
+	<key>ThrottleInterval</key>
+	<integer>5</integer>
+	<key>UserName</key>
+	<string>root</string>
+	<key>WatchPaths</key>
+	<array>
+		<string>/usr/local/etc/youtube-focus/youtube-focus.css</string>
+		<string>/usr/local/etc/youtube-focus</string>
+		<string>/Users/nathanmassicot/Library/Containers/com.apple.Safari/Data/Library/Preferences/com.apple.Safari.plist</string>
+	</array>
+</dict>
+</plist>

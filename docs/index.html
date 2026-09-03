@@ -1,0 +1,693 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YouTube Full Focus — get your time back without missing what you really like</title>
+<meta name="description" content="A macOS app that strips the recommendation feed, Shorts and end screens out of YouTube in Safari, and holds the block until a date you can only push further away.">
+<meta property="og:title" content="YouTube Full Focus">
+<meta property="og:description" content="Get your time back without missing what you really like. The feed goes. Search, subscriptions and playback stay.">
+<meta property="og:type" content="website">
+<meta name="theme-color" content="#000000">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'><rect width='64' height='64' fill='%23000'/><path d='M24 18 L46 32 L24 46 Z' fill='%23F2F0EA'/><rect x='4' y='27' width='56' height='10' fill='%23FF2D16'/></svg>">
+
+<style>
+  /* ------------------------------------------------------------------
+     YOUTUBE FULL FOCUS — brutalist download page.
+     Ink on paper, 3px rules, hard shadows, no rounded corners anywhere.
+     ------------------------------------------------------------------ */
+  :root{
+    --paper:#F2F0EA;
+    --ink:#0A0A0A;
+    --ink-soft:#4A4844;
+    --red:#FF2D16;
+    --acid:#E8FF3D;
+    --rule:3px;
+    --sans:"Helvetica Neue",Helvetica,Arial,"Segoe UI",system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono",SFMono-Regular,Menlo,"DejaVu Sans Mono",monospace;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{ --paper:#0B0B0B; --ink:#F2F0EA; --ink-soft:#9C9A94; }
+  }
+
+  *{box-sizing:border-box}
+  html{-webkit-text-size-adjust:100%; scroll-behavior:smooth}
+  body{
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--sans); font-size:17px; line-height:1.5;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{background:var(--red); color:#fff}
+  a{color:inherit}
+
+  .mark .pp{fill:var(--paper)}
+  .wrap{width:min(1180px,100%); margin-inline:auto; padding-inline:20px}
+
+  /* ---------- type ---------- */
+  h1,h2,h3{margin:0; font-weight:800; letter-spacing:-.03em; line-height:.94; text-transform:uppercase}
+  h1{font-size:clamp(40px,8.4vw,104px)}
+  h2{font-size:clamp(30px,5.2vw,60px)}
+  h3{font-size:19px; line-height:1.15; letter-spacing:-.01em}
+  p{margin:0 0 18px}
+  .mono{font-family:var(--mono)}
+  .label{
+    font-family:var(--mono); font-size:12px; font-weight:700;
+    letter-spacing:.16em; text-transform:uppercase;
+  }
+  .lead{font-size:clamp(17px,2vw,21px); line-height:1.45; max-width:34ch}
+  .dim{color:var(--ink-soft)}
+
+  /* ---------- nav ---------- */
+  nav{
+    position:sticky; top:0; z-index:50; background:var(--paper);
+    border-bottom:var(--rule) solid var(--ink);
+  }
+  nav .wrap{display:flex; align-items:stretch; gap:0; height:62px}
+  nav .brand{
+    display:flex; align-items:center; gap:12px; font-family:var(--mono);
+    font-weight:700; font-size:14px; letter-spacing:.04em; text-decoration:none;
+    text-transform:uppercase; padding-right:22px;
+  }
+  nav .brand .mark{width:22px; height:22px; flex:none}
+  nav .links{display:flex; align-items:center; gap:26px; margin-left:auto}
+  nav .links a{
+    font-family:var(--mono); font-size:12.5px; letter-spacing:.1em;
+    text-transform:uppercase; text-decoration:none; padding-bottom:2px;
+    border-bottom:2px solid transparent;
+  }
+  nav .links a:hover{border-bottom-color:var(--red)}
+  nav .nav-cta{
+    display:flex; align-items:center; padding:0 22px; margin-left:26px;
+    margin-right:-20px; background:var(--red); color:#fff; text-decoration:none;
+    font-family:var(--mono); font-weight:700; font-size:12.5px;
+    letter-spacing:.1em; text-transform:uppercase;
+    border-left:var(--rule) solid var(--ink);
+  }
+  nav .nav-cta:hover{background:var(--ink); color:var(--paper)}
+  @media (max-width:860px){ nav .links{display:none} }
+
+  /* ---------- hero ---------- */
+  .hero{border-bottom:var(--rule) solid var(--ink); overflow:hidden}
+  .hero .wrap{padding-block:clamp(38px,6vw,74px)}
+  .kicker{
+    display:inline-flex; align-items:center; gap:14px; margin-bottom:26px;
+    border:var(--rule) solid var(--ink); padding:7px 14px; background:var(--acid); color:#0A0A0A;
+  }
+  .kicker b{font-family:var(--mono); font-size:12px; letter-spacing:.14em; font-weight:700}
+  .hero h1{line-height:1.0}
+  .hero h1 span{display:block}
+  .hero h1 .hl{
+    background:var(--red); color:#fff; display:inline;
+    box-decoration-break:clone; -webkit-box-decoration-break:clone;
+    padding:.04em .12em .06em; margin-left:-.04em;
+  }
+  .hero-grid{
+    display:grid; grid-template-columns:1.35fr 1fr; gap:0;
+    margin-top:44px; border:var(--rule) solid var(--ink);
+  }
+  .hero-grid > div{padding:26px 28px}
+  .hero-grid > div + div{border-left:var(--rule) solid var(--ink)}
+  .cta{display:flex; flex-wrap:wrap; gap:16px; margin-top:6px}
+  .btn{
+    display:inline-flex; align-items:center; gap:12px; text-decoration:none;
+    font-family:var(--mono); font-weight:700; font-size:14px; letter-spacing:.08em;
+    text-transform:uppercase; padding:16px 24px; border:var(--rule) solid var(--ink);
+    background:var(--paper); color:var(--ink);
+    box-shadow:7px 7px 0 var(--ink);
+    transition:transform .08s linear, box-shadow .08s linear;
+  }
+  .btn:hover{transform:translate(4px,4px); box-shadow:3px 3px 0 var(--ink)}
+  .btn:active{transform:translate(7px,7px); box-shadow:0 0 0 var(--ink)}
+  .btn-primary{background:var(--red); color:#fff; border-color:var(--ink)}
+  .specs{list-style:none; margin:0; padding:0; font-family:var(--mono); font-size:13px}
+  .specs li{display:flex; justify-content:space-between; gap:16px; padding:9px 0; border-bottom:1px solid var(--ink)}
+  .specs li:last-child{border-bottom:0; padding-bottom:0}
+  .specs li b{font-weight:700}
+  @media (max-width:860px){
+    .hero-grid{grid-template-columns:1fr}
+    .hero-grid > div + div{border-left:0; border-top:var(--rule) solid var(--ink)}
+  }
+
+  /* ---------- marquee ---------- */
+  .ticker{
+    background:var(--ink); color:var(--paper); border-bottom:var(--rule) solid var(--ink);
+    overflow:hidden; white-space:nowrap; padding:13px 0;
+  }
+  .ticker div{display:inline-block; animation:slide 32s linear infinite}
+  .ticker span{
+    font-family:var(--mono); font-weight:700; font-size:14px;
+    letter-spacing:.18em; text-transform:uppercase; padding-inline:22px;
+  }
+  .ticker span i{color:var(--red); font-style:normal}
+  @keyframes slide{from{transform:translateX(0)} to{transform:translateX(-50%)}}
+  @media (prefers-reduced-motion:reduce){ .ticker div{animation:none} }
+
+  /* ---------- sections ---------- */
+  section{border-bottom:var(--rule) solid var(--ink)}
+  section > .wrap{padding-block:clamp(46px,6vw,84px)}
+  .head{
+    display:grid; grid-template-columns:auto 1fr; gap:22px;
+    align-items:start; margin-bottom:42px;
+  }
+  .num{
+    font-family:var(--mono); font-weight:700; font-size:14px; letter-spacing:.1em;
+    border:var(--rule) solid var(--ink); padding:8px 12px; line-height:1;
+  }
+  .head p{margin:16px 0 0; max-width:56ch; font-size:18px}
+
+  /* ---------- two columns: killed / kept ---------- */
+  .split{display:grid; grid-template-columns:1fr 1fr; border:var(--rule) solid var(--ink)}
+  .split > div + div{border-left:var(--rule) solid var(--ink)}
+  .split h3{
+    display:flex; align-items:center; gap:12px; padding:16px 22px;
+    border-bottom:var(--rule) solid var(--ink); font-family:var(--mono);
+    font-size:14px; letter-spacing:.12em;
+  }
+  .split .gone h3{background:var(--red); color:#fff}
+  .split .kept h3{background:var(--ink); color:var(--paper)}
+  .split ul{list-style:none; margin:0; padding:0}
+  .split li{padding:15px 22px; border-bottom:1px solid var(--ink); font-size:16px; line-height:1.35}
+  .split li:last-child{border-bottom:0}
+  .split .gone li{text-decoration:line-through; text-decoration-thickness:2px; color:var(--ink-soft)}
+  @media (max-width:760px){
+    .split{grid-template-columns:1fr}
+    .split > div + div{border-left:0; border-top:var(--rule) solid var(--ink)}
+  }
+
+  /* ---------- feature grid ---------- */
+  .grid{display:grid; grid-template-columns:repeat(3,1fr); border:var(--rule) solid var(--ink)}
+  .grid article{padding:26px 24px 28px; border-right:var(--rule) solid var(--ink); border-bottom:var(--rule) solid var(--ink)}
+  .grid article:nth-child(3n){border-right:0}
+  .grid article:nth-last-child(-n+3){border-bottom:0}
+  .grid .tag{
+    display:inline-block; font-family:var(--mono); font-size:11px; font-weight:700;
+    letter-spacing:.14em; margin-bottom:16px; border-bottom:var(--rule) solid var(--red);
+  }
+  .grid h3{margin-bottom:10px}
+  .grid p{margin:0; font-size:15.5px; line-height:1.45; color:var(--ink-soft)}
+  @media (max-width:900px){
+    .grid{grid-template-columns:1fr 1fr}
+    .grid article:nth-child(3n){border-right:var(--rule) solid var(--ink)}
+    .grid article:nth-child(2n){border-right:0}
+    .grid article:nth-last-child(-n+3){border-bottom:var(--rule) solid var(--ink)}
+    .grid article:nth-last-child(-n+2){border-bottom:0}
+  }
+  @media (max-width:560px){
+    .grid{grid-template-columns:1fr}
+    .grid article{border-right:0 !important; border-bottom:var(--rule) solid var(--ink) !important}
+    .grid article:last-child{border-bottom:0 !important}
+  }
+
+  /* ---------- app window mockup ---------- */
+  .shot{max-width:430px; margin:0; border:var(--rule) solid var(--ink); background:var(--paper); box-shadow:12px 12px 0 var(--ink)}
+  .titlebar{display:flex; align-items:center; gap:8px; padding:10px 14px; border-bottom:var(--rule) solid var(--ink); background:var(--ink)}
+  .titlebar i{width:11px; height:11px; border:2px solid var(--paper); display:block}
+  .titlebar i:first-child{background:var(--red); border-color:var(--red)}
+  .titlebar b{
+    margin-left:8px; color:var(--paper); font-family:var(--mono); font-size:11px;
+    font-weight:700; letter-spacing:.12em; text-transform:uppercase;
+  }
+  .win-head{display:flex; gap:14px; align-items:center; padding:18px; border-bottom:var(--rule) solid var(--ink)}
+  .win-head .mark{width:46px; height:46px; flex:none}
+  .win-head b{display:block; font-size:16px; font-weight:800; letter-spacing:-.01em; text-transform:uppercase}
+  .win-head span{font-size:11px; font-family:var(--mono); color:var(--ink-soft)}
+  .win-body{padding:18px; display:grid; gap:14px}
+  .panel{border:2px solid var(--ink); padding:14px}
+  .panel .cap{font-family:var(--mono); font-size:10px; font-weight:700; letter-spacing:.14em; margin-bottom:11px; text-transform:uppercase}
+  .live{display:flex; align-items:center; gap:11px}
+  .live .led{width:12px; height:12px; background:var(--red); flex:none}
+  .live b{display:block; font-size:14px; font-weight:800; text-transform:uppercase}
+  .live span{font-size:11px; font-family:var(--mono); color:var(--ink-soft)}
+  .days{margin-left:auto; text-align:right; line-height:1}
+  .days b{font-size:30px; font-weight:800; letter-spacing:-.03em}
+  .days span{font-family:var(--mono); font-size:9px; letter-spacing:.14em}
+  .seg{display:flex; border:2px solid var(--ink)}
+  .seg span{flex:1; text-align:center; font-family:var(--mono); font-size:11px; padding:7px 0; border-right:2px solid var(--ink)}
+  .seg span:last-child{border-right:0}
+  .seg span.on{background:var(--ink); color:var(--paper); font-weight:700}
+  .row{display:flex; gap:10px}
+  .row .b{
+    flex:1; text-align:center; font-family:var(--mono); font-size:11px; font-weight:700;
+    letter-spacing:.08em; text-transform:uppercase; padding:11px 0; border:2px solid var(--ink);
+  }
+  .row .b.fill{background:var(--red); color:#fff; border-color:var(--ink)}
+  .row .b.off{color:var(--ink-soft); border-style:dashed}
+  .shot-wrap{display:grid; grid-template-columns:auto 1fr; gap:56px; align-items:center}
+  .shot-note{max-width:38ch}
+  .shot-note h3{margin-bottom:14px; font-size:clamp(22px,3vw,32px); line-height:1}
+  @media (max-width:900px){ .shot-wrap{grid-template-columns:1fr; gap:36px} .shot{max-width:100%} }
+
+  /* ---------- steps ---------- */
+  .steps{border:var(--rule) solid var(--ink); margin:0; padding:0}
+  .steps li{display:grid; grid-template-columns:96px 1fr; list-style:none; border-bottom:var(--rule) solid var(--ink)}
+  .steps li:last-child{border-bottom:0}
+  .steps .n{
+    display:flex; align-items:center; justify-content:center; font-size:44px; font-weight:800;
+    letter-spacing:-.04em; border-right:var(--rule) solid var(--ink); background:var(--ink); color:var(--paper);
+  }
+  .steps .t{padding:22px 26px}
+  .steps .t h3{margin-bottom:8px}
+  .steps .t p{margin:0; color:var(--ink-soft); font-size:16px}
+  @media (max-width:560px){ .steps li{grid-template-columns:64px 1fr} .steps .n{font-size:30px} }
+
+  .warn{margin-top:30px; border:var(--rule) solid var(--ink); box-shadow:8px 8px 0 var(--red)}
+  .warn .bar{background:var(--acid); color:#0A0A0A; padding:12px 22px; border-bottom:var(--rule) solid var(--ink); font-family:var(--mono); font-weight:700; font-size:13px; letter-spacing:.1em; text-transform:uppercase}
+  .warn .body{padding:22px 24px}
+  .warn p:last-of-type{margin-bottom:0}
+  code{font-family:var(--mono); font-size:14px; background:var(--ink); color:var(--paper); padding:2px 6px}
+  pre{
+    margin:16px 0 0; padding:14px 16px; border:2px solid var(--ink); background:var(--ink);
+    color:var(--paper); font-family:var(--mono); font-size:13px; overflow-x:auto;
+  }
+  pre code{padding:0; background:none}
+
+  /* ---------- honesty ---------- */
+  .honest{display:grid; grid-template-columns:1fr 1fr; border:var(--rule) solid var(--ink)}
+  .honest > div{padding:26px 26px 30px}
+  .honest > div + div{border-left:var(--rule) solid var(--ink)}
+  .honest .cap{font-family:var(--mono); font-size:12px; font-weight:700; letter-spacing:.14em; text-transform:uppercase; margin-bottom:14px; display:inline-block; padding:5px 10px; border:2px solid var(--ink)}
+  .honest .yes .cap{background:var(--ink); color:var(--paper)}
+  .honest .no .cap{background:var(--red); color:#fff; border-color:var(--ink)}
+  .honest p{margin:0; font-size:16.5px; line-height:1.5}
+  @media (max-width:760px){ .honest{grid-template-columns:1fr} .honest > div + div{border-left:0; border-top:var(--rule) solid var(--ink)} }
+
+  /* ---------- faq ---------- */
+  .faq{border:var(--rule) solid var(--ink)}
+  .faq details{border-bottom:var(--rule) solid var(--ink)}
+  .faq details:last-child{border-bottom:0}
+  .faq summary{
+    cursor:pointer; list-style:none; padding:20px 24px; font-weight:800; font-size:18px;
+    letter-spacing:-.01em; display:flex; gap:18px; align-items:baseline;
+  }
+  .faq summary::-webkit-details-marker{display:none}
+  .faq summary::after{content:"+"; margin-left:auto; font-family:var(--mono); font-weight:700; font-size:22px; line-height:1}
+  .faq details[open] summary{background:var(--ink); color:var(--paper)}
+  .faq details[open] summary::after{content:"−"}
+  .faq .a{padding:0 24px 22px; max-width:74ch}
+  .faq details[open] .a{padding-top:20px}
+  .faq .a p:last-child{margin-bottom:0}
+
+  /* ---------- closer + footer ---------- */
+  .closer{background:var(--ink); color:var(--paper); text-align:center}
+  .closer .wrap{padding-block:clamp(56px,8vw,100px)}
+  .closer h2{margin-bottom:30px}
+  .closer h2 em{font-style:normal; color:var(--red)}
+  .closer .btn{background:var(--paper); color:var(--ink); border-color:var(--paper); box-shadow:7px 7px 0 var(--red)}
+  .closer .btn:hover{box-shadow:3px 3px 0 var(--red)}
+  .closer .cta{justify-content:center}
+  .closer .label{margin-top:26px; color:#9C9A94}
+  footer{background:var(--paper)}
+  footer .wrap{
+    display:flex; flex-wrap:wrap; gap:18px 30px; align-items:center;
+    padding-block:26px; font-family:var(--mono); font-size:12.5px; letter-spacing:.06em; text-transform:uppercase;
+  }
+  footer a{text-decoration:none; border-bottom:2px solid var(--red)}
+  footer .sp{margin-left:auto}
+</style>
+</head>
+<body>
+
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#top">
+      <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+        <rect width="64" height="64" fill="currentColor"/>
+        <path class="pp" d="M24 18 L46 32 L24 46 Z"/>
+        <rect x="0" y="27" width="64" height="10" fill="#FF2D16"/>
+      </svg>
+      YouTube Full Focus
+    </a>
+    <div class="links">
+      <a href="#what">What it does</a>
+      <a href="#how">Under the hood</a>
+      <a href="#install">Install</a>
+      <a href="#limits">Limits</a>
+      <a href="#faq">FAQ</a>
+      <a href="https://github.com/Nathan-massicot/YouTube-Focus-Watchdog">GitHub</a>
+    </div>
+    <a class="nav-cta" href="https://github.com/Nathan-massicot/YouTube-Focus-Watchdog/releases/latest/download/YouTube-Full-Focus.dmg">Download</a>
+  </div>
+</nav>
+
+<header class="hero" id="top">
+  <div class="wrap">
+    <div class="kicker"><b>macOS · Safari · v1.0.0</b></div>
+    <h1>
+      <span>Get your time back</span>
+      <span>without missing</span>
+      <span><span class="hl">what you really like</span></span>
+    </h1>
+
+    <div class="hero-grid">
+      <div>
+        <p class="lead">
+          YouTube Full Focus deletes the recommendation feed, the Shorts shelf and the
+          end screens from YouTube in Safari. Search, subscriptions and playback are
+          left completely alone.
+        </p>
+        <p class="lead dim">
+          You set an end date. You can push it further away. You cannot pull it closer.
+        </p>
+        <div class="cta">
+          <a class="btn btn-primary" href="https://github.com/Nathan-massicot/YouTube-Focus-Watchdog/releases/latest/download/YouTube-Full-Focus.dmg">↓ Download for macOS</a>
+          <a class="btn" href="https://github.com/Nathan-massicot/YouTube-Focus-Watchdog">Read the source</a>
+        </div>
+      </div>
+      <div>
+        <p class="label" style="margin-bottom:16px">Spec sheet</p>
+        <ul class="specs">
+          <li><span>Format</span> <b>.dmg</b></li>
+          <li><span>System</span> <b>macOS 13+</b></li>
+          <li><span>Chips</span> <b>Apple &amp; Intel</b></li>
+          <li><span>Browser</span> <b>Safari only</b></li>
+          <li><span>Network</span> <b>None</b></li>
+          <li><span>Telemetry</span> <b>None</b></li>
+          <li><span>Licence</span> <b>MIT</b></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</header>
+
+<div class="ticker" aria-hidden="true">
+  <div>
+    <span>No feed <i>/</i></span><span>No shorts <i>/</i></span><span>No end screens <i>/</i></span>
+    <span>No thumbnail bait <i>/</i></span><span>Search still works <i>/</i></span><span>Subscriptions still work <i>/</i></span>
+    <span>No feed <i>/</i></span><span>No shorts <i>/</i></span><span>No end screens <i>/</i></span>
+    <span>No thumbnail bait <i>/</i></span><span>Search still works <i>/</i></span><span>Subscriptions still work <i>/</i></span>
+  </div>
+</div>
+
+<section id="what">
+  <div class="wrap">
+    <div class="head">
+      <div class="num">01</div>
+      <div>
+        <h2>It cuts the feed,<br>not YouTube</h2>
+        <p>
+          Most blockers take the whole site away, so you turn them off the first time
+          you need a tutorial. This one is surgical: the surfaces that are designed to
+          keep you scrolling go, and everything you actually came for stays.
+        </p>
+      </div>
+    </div>
+
+    <div class="split">
+      <div class="gone">
+        <h3>✕ Gone</h3>
+        <ul>
+          <li>The homepage recommendation grid</li>
+          <li>Shorts — the shelf and the sidebar entry</li>
+          <li>The “Up next” rail on video pages</li>
+          <li>End screens, including the 2026 player</li>
+          <li>Recommended thumbnails and titles</li>
+          <li>The topic filter bar and channel avatars</li>
+        </ul>
+      </div>
+      <div class="kept">
+        <h3>✓ Untouched</h3>
+        <ul>
+          <li>Search, with thumbnails and durations</li>
+          <li>Your subscriptions and your playlists</li>
+          <li>The player, with zero added latency</li>
+          <li>Comments and the description</li>
+          <li>History and Watch Later</li>
+          <li>Every other website, obviously</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="app">
+  <div class="wrap">
+    <div class="shot-wrap">
+      <div class="shot">
+        <div class="titlebar"><i></i><i></i><i></i><b>YouTube Full Focus</b></div>
+        <div class="win-head">
+          <svg class="mark" viewBox="0 0 64 64" aria-hidden="true">
+            <rect width="64" height="64" fill="currentColor"/>
+            <path class="pp" d="M24 18 L46 32 L24 46 Z"/>
+            <rect x="0" y="27" width="64" height="10" fill="#FF2D16"/>
+          </svg>
+          <div>
+            <b>YouTube Full Focus</b>
+            <span>Feed, Shorts &amp; end screens off in Safari</span>
+          </div>
+        </div>
+        <div class="win-body">
+          <div class="panel">
+            <div class="cap">Status</div>
+            <div class="live">
+              <span class="led"></span>
+              <div>
+                <b>Block active</b>
+                <span>Locked until 2 Oct 2026</span>
+              </div>
+              <div class="days"><b>30</b><br><span>DAYS</span></div>
+            </div>
+          </div>
+          <div class="panel">
+            <div class="cap">Extend</div>
+            <div class="seg">
+              <span>7D</span><span>14D</span><span class="on">30D</span><span>90D</span><span>DATE…</span>
+            </div>
+          </div>
+          <div class="row">
+            <div class="b fill">Extend</div>
+            <div class="b off">Remove ✕</div>
+          </div>
+        </div>
+      </div>
+      <div class="shot-note">
+        <p class="label" style="color:var(--red)">The whole interface</p>
+        <h3>One window.<br>One date.<br>Two buttons.</h3>
+        <p class="dim">
+          No account, no dashboard, no streak counter, no notifications. You open it to
+          start, you open it to push the date further out, and the rest of the time it
+          is not running at all.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="how">
+  <div class="wrap">
+    <div class="head">
+      <div class="num">02</div>
+      <div>
+        <h2>Built to hold,<br>not to weigh</h2>
+        <p>
+          A stylesheet, a 120-line shell script and a launchd daemon that sleeps until
+          something touches a protected file. That is the entire product.
+        </p>
+      </div>
+    </div>
+
+    <div class="grid">
+      <article>
+        <span class="tag">01 — IDLE</span>
+        <h3>Zero polling</h3>
+        <p>The daemon only wakes when a protected file changes (launchd WatchPaths). At rest it costs nothing — no stutter during playback.</p>
+      </article>
+      <article>
+        <span class="tag">02 — LOCK</span>
+        <h3>Immutable stylesheet</h3>
+        <p>The CSS and its backup are owned by root and flagged <code>uchg</code>. They cannot be edited or deleted without admin rights.</p>
+      </article>
+      <article>
+        <span class="tag">03 — REPAIR</span>
+        <h3>Self-healing</h3>
+        <p>Turn the stylesheet off in Safari and the daemon turns it back on and restarts Safari within a second. Delete the file and it is restored from the locked backup.</p>
+      </article>
+      <article>
+        <span class="tag">04 — TIME</span>
+        <h3>Firm end date</h3>
+        <p>Uninstalling refuses to run before the date you chose — in the app and on the command line alike. It unlocks itself the day after.</p>
+      </article>
+      <article>
+        <span class="tag">05 — BUILD</span>
+        <h3>Universal binary</h3>
+        <p>One app for Apple Silicon and Intel, with no dependencies: no Homebrew, no Xcode, no Safari extension to approve.</p>
+      </article>
+      <article>
+        <span class="tag">06 — TRUST</span>
+        <h3>Nothing to hide</h3>
+        <p>No network calls, no logs, no telemetry. Every line that runs on your Mac is readable on GitHub before you install it.</p>
+      </article>
+    </div>
+  </div>
+</section>
+
+<section id="install">
+  <div class="wrap">
+    <div class="head">
+      <div class="num">03</div>
+      <div>
+        <h2>Three minutes,<br>once</h2>
+        <p>Download, drag, pick a duration. macOS asks for your admin password once — that is what installs the daemon and locks the stylesheet.</p>
+      </div>
+    </div>
+
+    <ul class="steps">
+      <li>
+        <div class="n">1</div>
+        <div class="t">
+          <h3>Download and drag to Applications</h3>
+          <p>Open the .dmg, drag <b>YouTube Full Focus</b> onto the Applications shortcut.</p>
+        </div>
+      </li>
+      <li>
+        <div class="n">2</div>
+        <div class="t">
+          <h3>Allow the first launch</h3>
+          <p>The app is not notarised by Apple, so macOS blocks it the first time. See the box below — it is a one-off.</p>
+        </div>
+      </li>
+      <li>
+        <div class="n">3</div>
+        <div class="t">
+          <h3>Pick a duration, hit Activate</h3>
+          <p>Enter your admin password so the daemon can be installed and the stylesheet locked. Safari may restart once.</p>
+        </div>
+      </li>
+    </ul>
+
+    <div class="warn">
+      <div class="bar">⚠ “YouTube Full Focus cannot be opened”</div>
+      <div class="body">
+        <p>
+          Expected. Shipping an app without that warning requires a paid Apple Developer
+          account. The code is fully public instead — judge it yourself.
+        </p>
+        <p>
+          <b>To open it:</b> launch the app once (the warning appears), then go to
+          <b>System Settings › Privacy &amp; Security</b>, scroll to the <b>Security</b>
+          section and click <b>Open Anyway</b>.
+        </p>
+        <p class="label dim" style="margin-bottom:0">One-line alternative</p>
+        <pre><code>xattr -d com.apple.quarantine "/Applications/YouTube Full Focus.app"</code></pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="limits">
+  <div class="wrap">
+    <div class="head">
+      <div class="num">04</div>
+      <div>
+        <h2>How hard is<br>the block, really?</h2>
+        <p>
+          On a personal Mac, no tool can stop you forever — you are the administrator of
+          your own machine. YouTube Full Focus does not pretend otherwise.
+        </p>
+      </div>
+    </div>
+
+    <div class="honest">
+      <div class="yes">
+        <span class="cap">Guaranteed</span>
+        <p>
+          The block survives everything you do without thinking: turning the stylesheet
+          off in Safari, deleting the CSS file, rebooting the Mac. Each attempt is undone
+          within a second, and uninstalling is refused before the date you chose.
+        </p>
+      </div>
+      <div class="no">
+        <span class="cap">Not guaranteed</span>
+        <p>
+          With your admin password you can always unload the daemon. To close that door,
+          browse from a standard macOS account: no <code>sudo</code>, no
+          <code>chflags</code>, no unloading a daemon is possible there.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="faq">
+  <div class="wrap">
+    <div class="head">
+      <div class="num">05</div>
+      <div><h2>Practical<br>details</h2></div>
+    </div>
+
+    <div class="faq">
+      <details>
+        <summary>Does it work in Chrome, Firefox or Arc?</summary>
+        <div class="a">
+          <p>
+            No. The block relies on Safari's user stylesheet, a setting specific to that
+            browser. Other browsers are untouched — a deliberate limit, and one more
+            argument for browsing from a standard account where you will not be installing
+            another browser.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>Why does the app ask for my admin password?</summary>
+        <div class="a">
+          <p>
+            For three things: installing a LaunchDaemon in <code>/Library/LaunchDaemons</code>,
+            writing the stylesheet to <code>/usr/local/etc</code>, and locking it with
+            <code>chflags uchg</code>. Without those privileges the block would come off in one click.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>Do I really have to grant Full Disk Access to /bin/bash?</summary>
+        <div class="a">
+          <p>
+            Recommended, not required. Without it the CSS stays locked and active, but the
+            daemon cannot re-tick the “user stylesheet” setting if you switch it off in Safari.
+            The app has a button that opens the right settings pane directly.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>Can I shorten the period once it has started?</summary>
+        <div class="a">
+          <p>
+            No, and that is the whole point. The app only accepts a date later than the current
+            one, and the uninstaller refuses to run before the deadline. The day after your end
+            date, the Remove button unlocks on its own.
+          </p>
+        </div>
+      </details>
+      <details>
+        <summary>What happens to the videos I actually want to watch?</summary>
+        <div class="a">
+          <p>
+            Nothing. Search, subscriptions, playlists, history and Watch Later all behave exactly
+            as before, thumbnails included. The only thing you lose is the content you did not ask
+            for — which is the content that eats the hours.
+          </p>
+        </div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section class="closer">
+  <div class="wrap">
+    <h2>Stop scrolling.<br><em>Keep watching.</em></h2>
+    <div class="cta">
+      <a class="btn" href="https://github.com/Nathan-massicot/YouTube-Focus-Watchdog/releases/latest/download/YouTube-Full-Focus.dmg">↓ Download for macOS</a>
+    </div>
+    <p class="label">.dmg · macOS 13 Ventura and later · Apple Silicon &amp; Intel · MIT</p>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>YouTube Full Focus</span>
+    <span class="dim">Not affiliated with YouTube or Google</span>
+    <span class="sp"><a href="https://github.com/Nathan-massicot/YouTube-Focus-Watchdog">Source</a></span>
+    <span><a href="https://github.com/Nathan-massicot/YouTube-Focus-Watchdog/blob/main/LICENSE">MIT</a></span>
+  </div>
+</footer>
+
+</body>
+</html>

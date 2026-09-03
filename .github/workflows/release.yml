@@ -1,0 +1,75 @@
+name: Build and release
+
+# Tagging v1.0.0 builds the app on a real macOS runner and attaches the disk
+# image to a GitHub Release. The download page links to the stable asset name
+# releases/latest/download/YouTube-Full-Focus.dmg, so that file must always be there.
+
+on:
+  push:
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build the app and disk image
+        run: ./build.sh
+
+      - name: Verify the build
+        run: |
+          set -euo pipefail
+          APP="dist/YouTube Full Focus.app"
+
+          # Must be signed (ad-hoc is enough) or it will not launch on Apple Silicon
+          codesign --verify --strict "${APP}"
+
+          # Must carry both architectures
+          archs="$(lipo -archs "${APP}/Contents/MacOS/YouTubeFocus")"
+          echo "Architectures: ${archs}"
+          [[ "${archs}" == *arm64* && "${archs}" == *x86_64* ]] \
+            || { echo "::error::Binary is not universal"; exit 1; }
+
+          # The embedded shell payload must be intact and parseable
+          for f in install.sh uninstall.sh watchdog.sh config.env; do
+            bash -n "${APP}/Contents/Resources/payload/${f}"
+          done
+          plutil -lint "${APP}/Contents/Resources/payload/com.focus.youtube.watchdog.plist"
+
+          # install.sh must not have regained a python3 dependency: /usr/bin/python3
+          # is a Command Line Tools stub on a stock Mac and would break the install.
+          if grep -nE '^[^#]*\bpython3?\b' "${APP}/Contents/Resources/payload/install.sh"; then
+            echo "::error::install.sh calls python — it must stay dependency-free"
+            exit 1
+          fi
+
+      - name: Stage release assets
+        run: |
+          set -euo pipefail
+          VERSION="$(tr -d '[:space:]' < VERSION)"
+          mkdir -p release
+          cp "dist/YouTube-Full-Focus-${VERSION}.dmg" "release/YouTube-Full-Focus-${VERSION}.dmg"
+          # Stable filename for the download page's direct link
+          cp "dist/YouTube-Full-Focus-${VERSION}.dmg" "release/YouTube-Full-Focus.dmg"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: YouTube-Full-Focus-dmg
+          path: release/*.dmg
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" release/*.dmg \
+            --title "YouTube Full Focus ${GITHUB_REF_NAME#v}" \
+            --generate-notes

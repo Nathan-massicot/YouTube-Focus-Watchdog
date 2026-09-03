@@ -1,4 +1,6 @@
-# YouTube Focus Watchdog
+# YouTube Full Focus
+
+**Get your time back without missing what you really like.**
 
 A self-healing macOS system that removes YouTube **recommendations, Shorts, and
 recommendation thumbnails** in Safari — without blocking videos, search, or
@@ -12,6 +14,15 @@ watches) and stays completely idle otherwise — zero overhead while you browse.
 > yourself. If stopping *yourself* from doing that matters to you, there is one
 > optional step (browsing from a Standard, non-admin account), described in
 > [Optional: make it hard to disable yourself](#optional-make-it-hard-to-disable-yourself).
+
+**[⬇ Download YouTube Full Focus for macOS](https://github.com/Nathan-massicot/YouTube-Focus-Watchdog/releases/latest/download/YouTube-Full-Focus.dmg)**
+ · [Download page](https://nathan-massicot.github.io/YouTube-Focus-Watchdog/)
+ · macOS 13+ · Apple Silicon and Intel
+
+The app is a thin front end over the scripts in this repository: it picks the end
+date, asks for your administrator password once, and runs the very same
+`install.sh` / `uninstall.sh`. Everything below works identically from a terminal
+if you prefer.
 
 ---
 
@@ -112,14 +123,31 @@ it for administration only.
 ## Setup
 
 ### 1. Install
+
+**Option A — the app.** Download
+[`YouTube-Full-Focus.dmg`](https://github.com/Nathan-massicot/YouTube-Focus-Watchdog/releases/latest/download/YouTube-Full-Focus.dmg),
+drag *YouTube Full Focus* into Applications, pick a duration and click **Activer le
+blocage**. macOS asks for your administrator password once.
+
+> **First launch is blocked by Gatekeeper.** The app is ad-hoc signed but not
+> notarised — notarisation requires a paid Apple Developer account. Open it once
+> (macOS refuses), then go to *System Settings → Privacy & Security*, scroll to
+> Security and click **Open Anyway**. Or clear the quarantine flag yourself:
+> `xattr -d com.apple.quarantine "/Applications/YouTube Full Focus.app"`.
+
+**Option B — the command line.**
 ```bash
 git clone https://github.com/Nathan-massicot/YouTube-Focus-Watchdog.git
 cd YouTube-Focus-Watchdog
-sudo bash install.sh        # enter a future end date: YYYY-MM-DD
+sudo bash install.sh                        # prompts for an end date
+sudo bash install.sh --expiry 2026-12-01    # or set it up front, unattended
 ```
-The installer deploys the stylesheet (a live copy plus an immutable backup), the
-watchdog, config, and the event-driven daemon, then runs one enforcement pass. It
-also strips any leftover `/etc/hosts` block from older versions.
+
+Either way the installer deploys the stylesheet (a live copy plus an immutable
+backup), the watchdog, config, and the event-driven daemon, then runs one
+enforcement pass. It also strips any leftover `/etc/hosts` block from older
+versions. It depends on nothing beyond a stock macOS — no Homebrew, no Python, no
+Command Line Tools.
 
 ### 2. Point Safari at the stylesheet, once
 *Safari → Settings → Advanced → Style sheet → Other…* →
@@ -148,6 +176,9 @@ off yourself, do steps 2–3 inside a Standard (non-admin) account instead — s
 ---
 
 ## Uninstallation
+
+In the app, click **Retirer** — it is greyed out until the period ends. From a
+terminal:
 
 ```bash
 sudo bash uninstall.sh
@@ -220,6 +251,48 @@ interfere with video playback.
 | macOS Safe Mode disables LaunchDaemons | Full access is possible in Safe Mode. |
 | YouTube changes its DOM | Some CSS selectors may stop matching; update `youtube-focus.css` and re-install. |
 | `uninstall.sh` is in the repo | Anyone with `sudo` can run it before expiry; delete it after install if you want to remove that path. |
+
+---
+
+## Building from source
+
+`build.sh` produces the universal app bundle and the disk image. It needs only
+the Xcode Command Line Tools (`xcode-select --install`) — no full Xcode, no
+third-party tooling, and no binary assets in the repository (the icon is rendered
+from `app/make-icon.swift` at build time).
+
+```bash
+./build.sh                 # → dist/YouTube Full Focus.app and dist/YouTube-Full-Focus-<version>.dmg
+SKIP_DMG=1 ./build.sh      # app bundle only
+```
+
+Layout:
+
+| Path | Role |
+|------|------|
+| `app/Sources/` | SwiftUI front end (window, status probing, privileged runner) |
+| `app/make-icon.swift` | Renders `AppIcon.icns` with CoreGraphics |
+| `build.sh` | Compiles arm64 + x86_64, assembles the bundle, ad-hoc signs, builds the DMG |
+| `docs/` | The download page, served by GitHub Pages |
+| `VERSION` | Single source of truth for the version number |
+
+The app embeds the shell project under `Contents/Resources/payload/` and runs it
+through `osascript … with administrator privileges`; it contains no enforcement
+logic of its own.
+
+**Releasing.** Bump `VERSION`, commit, then push a matching tag:
+
+```bash
+git tag v1.0.0 && git push origin v1.0.0
+```
+
+`.github/workflows/release.yml` builds on a macOS runner, checks the bundle is
+signed, universal and dependency-free, and attaches both
+`YouTube-Full-Focus-<version>.dmg` and the stable `YouTube-Full-Focus.dmg` (which the
+download page links to) to a new GitHub Release.
+
+**Publishing the download page.** In *Settings → Pages*, set the source to the
+`main` branch and the `/docs` folder.
 
 ---
 
